@@ -1,0 +1,1399 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="UNREAL">
+  <title>UNREAL 17–18.07</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Firebase -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+  <script>
+    // ── SCHRITT 1: Deine Firebase-Config hier einfügen ──────────────────────
+    // console.firebase.google.com → Projekt → Projekteinstellungen → "Deine Apps"
+    const FIREBASE_CONFIG = {
+      apiKey:            "AIzaSyBzGOIZrQCG9I1iaiov5Hxupy6SgRu9Fcw",
+      authDomain:        "unreal-546b4.firebaseapp.com",
+      databaseURL:       "https://unreal-546b4-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId:         "unreal-546b4",
+      storageBucket:     "unreal-546b4.firebasestorage.app",
+      messagingSenderId: "674503516490",
+      appId:             "1:674503516490:web:2df6cffa6bdf7a2c5861b3",
+    };
+    // ────────────────────────────────────────────────────────────────────────
+
+    const isFirebaseConfigured = !FIREBASE_CONFIG.apiKey.startsWith("DEINE");
+    let db = null;
+    if (isFirebaseConfigured) {
+      firebase.initializeApp(FIREBASE_CONFIG);
+      db = firebase.database();
+    }
+  </script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;700&family=Bebas+Neue&display=swap');
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body { margin: 0; background: #09090b; overscroll-behavior: none; }
+    ::-webkit-scrollbar { width: 3px; }
+    ::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 2px; }
+    details summary::-webkit-details-marker { display: none; }
+    .bebas { font-family: 'Bebas Neue', sans-serif; letter-spacing: .05em; }
+    .mono { font-family: 'IBM Plex Mono', 'Courier New', monospace; }
+    input[type="search"]::-webkit-search-cancel-button { -webkit-appearance: none; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useCallback, useRef } = React;
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // DATA
+    // ─────────────────────────────────────────────────────────────────────────
+    const EVENT_META = { name: "Unreal", date: "17.–18.07.2026", city: "Dortmund · Junkyard" };
+    const UNREAL_TEAM = ["Raphael", "Erik", "Tom"];
+
+    const ARTISTS = [
+      // ── Fr 17.07 · Floor I Outdoor ──────────────────────────────────────
+      {
+        id: 101, name: "Amilli", day: "Fr 17.07",
+        contact: [{ name: "Ana", phone: "+49 176 97706600" }],
+        rider: "2x Sekt\n4x Wasser",
+        tech: "A&H92 · 4x CDJ 3000",
+        setStart: "16:00", setEnd: "17:00", stage: "Floor I Outdoor",
+        transfers: [],
+      },
+      {
+        id: 102, name: "Haná", day: "Fr 17.07",
+        contact: [{ name: "Hannah Charlotte Opgaard", phone: "+44 7710 268053" }],
+        rider: "4x Wasser still\n2x Powerade\n3x Red Bull\n1x Vodka Absolut\n2x Capri Sonne\nVogue Zigaretten\n1x Handtuch",
+        tech: "DJM A9 · 4x CDJ 3000 · ⚠️ zwei Mixer nebeneinander, A9 abbauen nach Set",
+        setStart: "17:00", setEnd: "18:30", stage: "Floor I Outdoor",
+        transfers: [{ time: "2026-07-17T15:50", from: "Hotel", to: "Venue", statusKey: "pickup_erledigt" }],
+      },
+      {
+        id: 103, name: "Adrian Mills", day: "Fr 17.07",
+        contact: [{ name: "Adrian Ortíz", phone: "+49 176 32123985" }],
+        rider: "2x Wasser still (0,33L)\n1x schwarzes Handtuch\n10x Fanta Exotic\n4x Powerade\n10x Red Bull (Blue / Green / White)\nOCB Long Papes\n1x Pall Mall Blau\nWeed 1–2g\nMango / Früchte\n1x Orbit Lemon Kaugummi",
+        tech: "A&H92 · 4x CDJ 3000",
+        setStart: "18:30", setEnd: "20:30", stage: "Floor I Outdoor",
+        transfers: [{ time: "2026-07-17T18:00", from: "Hotel", to: "Venue", statusKey: "pickup_erledigt" }],
+      },
+      {
+        id: 104, name: "Cloudy", day: "Fr 17.07",
+        contact: [{ name: "Claudia Koziolek", phone: "+49 176 47650659" }],
+        rider: "10x Wasser still\n1x Handtuch\n1x Vodka Belvedere\n4x Wasser sprudel (0,33L)\n4x Club Mate / Red Bull\n1x Capri Sun\n2x Marlboro Gold\n1x Banane\nSnack Bars (Nüsse)",
+        tech: "A&H96 · 4x CDJ 3000",
+        setStart: "20:30", setEnd: "22:00", stage: "Floor I Outdoor",
+        transfers: [{ time: "2026-07-17T19:30", from: "Hotel", to: "Venue", statusKey: "pickup_erledigt" }],
+      },
+      // ── Fr 17.07 · Floor II Indoor ────────────────────────────────────────
+      {
+        id: 105, name: "Johannes Schuster", day: "Fr 17.07",
+        contact: [{ name: "Johannes Schuster", phone: "+49 174 3391958" }],
+        rider: "2x Wasser sprudel\n1x Handtuch\n2x Champagner\n1x Premium Vodka (Grey Goose / Belvedere)\n4x Bier (lokal, Pilsner / Helles / Lager)\n4x Red Bull Zero\n4x ChariTea Mate\n4x Volvic Essence Zitrusfrucht Rosmarin\n4x Coca Cola Zero\n4x Limettenscheiben\n4x Coconut Water\n2x Protein Bars",
+        tech: "A&H96 · 4x CDJ 3000",
+        setStart: "22:00", setEnd: "00:00", stage: "Floor II Indoor",
+        notes: "Kommt gemeinsam mit Prossowski – Pickup 21:15",
+        transfers: [{ time: "2026-07-17T21:15", from: "Hotel", to: "Venue", statusKey: "pickup_erledigt" }],
+      },
+      {
+        id: 106, name: "Kander", day: "Fr 17.07",
+        contact: [{ name: "Alex Harrison", phone: "+44 7711 921808" }],
+        rider: "1x Vodka Belvedere\nCamel Blue\n2x Coconut Water\nWasser sprudel\nZitronen\nClub Mate oder Red Bull\n1x Ginger Shot\nSweets / Haribo\nAlkoholfreies Bier\n4x Wasser\n1x Handtuch",
+        tech: "A&H96 · 4x CDJ 3000",
+        setStart: "00:00", setEnd: "02:00", stage: "Floor II Indoor",
+        transfers: [{ time: "2026-07-17T23:15", from: "Hotel", to: "Venue", statusKey: "pickup_erledigt" }],
+      },
+      {
+        id: 107, name: "A.N.I.", day: "Fr 17.07",
+        contact: [
+          { name: "Ani Taschjian", phone: "" },
+          { name: "TM Ersin Akgül", phone: "+49 176 70584700" },
+        ],
+        rider: "1x Handtuch\nCola Zero\nWasser sprudel\n1x Vodka Belvedere\nBier",
+        tech: "A&H96 · 4x CDJ 3000",
+        setStart: "02:00", setEnd: "04:00", stage: "Floor II Indoor",
+        transfers: [{ time: "2026-07-18T01:15", from: "Hotel", to: "Venue", statusKey: "pickup_erledigt" }],
+      },
+      {
+        id: 108, name: "Emma Lena", day: "Fr 17.07",
+        contact: [{ name: "Emma", phone: "+49 177 4847445" }],
+        rider: "2x Wasser\n2x Mate\n2x Red Bull",
+        tech: "A&H96 · 4x CDJ 3000",
+        setStart: "04:00", setEnd: "06:00", stage: "Floor II Indoor",
+        transfers: [{ time: "2026-07-18T03:15", from: "Hotel", to: "Venue", statusKey: "pickup_erledigt" }],
+      },
+      // ── Fr 17.07 · Floor III Indoor ──────────────────────────────────────
+      {
+        id: 109, name: "Prossowski", day: "Fr 17.07",
+        contact: [{ name: "Lukas Prossowski", phone: "+49 152 26562794" }],
+        rider: "1x Zitronensaft\n1x Absolut Vodka\nWasser sprudel",
+        tech: "A&H96 · 3x CDJ 3000",
+        setStart: "22:00", setEnd: "00:00", stage: "Floor III Indoor",
+        notes: "Kommt gemeinsam mit Johannes Schuster – Pickup 21:15",
+        transfers: [{ time: "2026-07-17T21:15", from: "Hotel", to: "Venue", statusKey: "pickup_erledigt" }],
+      },
+      {
+        id: 110, name: "Flacco", day: "Fr 17.07",
+        contact: [{ name: "Leo Schneider", phone: "+49 163 1661502" }],
+        rider: "4x Fiji Water still\n6x Corona\n1x Absolut Vodka\n6x Wasser sprudel\n1x Lime Juice\nR1 Blue Zigaretten\n1x Handtuch\nVentilator",
+        tech: "A&H96 · 3x CDJ 3000",
+        setStart: "00:00", setEnd: "02:00", stage: "Floor III Indoor",
+        transfers: [],
+      },
+      {
+        id: 111, name: "Celodic", day: "Fr 17.07",
+        contact: [],
+        rider: "6x Wasser still",
+        tech: "A&H96 · 3x CDJ 3000",
+        setStart: "02:00", setEnd: "04:00", stage: "Floor III Indoor",
+        transfers: [],
+      },
+      // ── Sa 18.07 · Floor I Outdoor ──────────────────────────────────
+      {
+        id: 201, name: "Esch", day: "Sa 18.07",
+        contact: [{ name: "Jana", phone: "+49 172 6084130" }],
+        rider: "2x Sekt\n4x Mate\n2x Wasser",
+        tech: "A&H 96 · 4x CDJ 3000",
+        setStart: "14:00", setEnd: "16:30", stage: "Floor I Outdoor",
+        transfers: [],
+      },
+      {
+        id: 202, name: "Aerea", day: "Sa 18.07",
+        contact: [
+          { name: "Carlota Hernandez", phone: "+34 643 17 87 20" },
+          { name: "Ruben Peces Picas", phone: "+34 664 12 70 6" },
+        ],
+        rider: "Stilles Mineralwasser\nSoft Drinks\nBier\n1x Roku Suntory Japanese Gin\n1x Suntory Toki Whisky\n2x Handtücher\n2x Ventilatoren auf der Bühne",
+        tech: "A&H 96 Stand alone · 1x Shure SM58 Mic + XLR · 2x Fans · 1x EU Power Strip",
+        setStart: "16:30", setEnd: "18:00", stage: "Floor I Outdoor",
+        soundcheck: "13:00",
+        notes: "Soundcheck 13:00 – drei Pickups! Ruben (Videograf) separat 15:15",
+        transfers: [
+          { time: "2026-07-18T12:45", from: "Hotel", to: "Venue (Soundcheck)", statusKey: "pickup_erledigt", label: "Aerea SC-Pickup" },
+          { time: "2026-07-18T15:15", from: "Hotel", to: "Venue", statusKey: "pickup2_erledigt", label: "Ruben (Videograf)" },
+          { time: "2026-07-18T16:00", from: "Hotel", to: "Venue", statusKey: "pickup3_erledigt", label: "Aerea Pickup" },
+        ],
+      },
+      {
+        id: 203, name: "Nikolina", day: "Sa 18.07",
+        contact: [{ name: "Ronja Hauck", phone: "+49 176 24885054" }],
+        rider: "2x Prosecco\nRed Bull oder Club Mate\n3x Wasser still\nFrüchte (Erdbeeren, Trauben, Blaubeeren)\n1x Marlboro Gold\n1x Kaugummi",
+        tech: "A&H 96 · 4x CDJ 3000",
+        setStart: "18:00", setEnd: "20:00", stage: "Floor I Outdoor",
+        transfers: [],
+      },
+      {
+        id: 204, name: "Kloud", day: "Sa 18.07",
+        contact: [{ name: "Kloud", phone: "+1 818 970 0710" }],
+        rider: "2x Red Bull / Energy Drink\n4x Handtücher (weiß/schwarz)\n6x Wasser / Wasser sprudel\n1x Organic Coconut Water\n6x lokales Bier (kein IPA)\n1x Don Julio 1942\n1x Moët & Chandon Champagner",
+        tech: "DJM V10 · 4x CDJ 3000",
+        setStart: "20:00", setEnd: "22:00", stage: "Floor I Outdoor",
+        notes: "⚠️ Anonym / trägt Maske – separater Raum oberhalb Backstage",
+        transfers: [{ time: "2026-07-18T18:45", from: "Hotel", to: "Venue", statusKey: "pickup_erledigt" }],
+      },
+      // ── Sa 18.07 · Floor II Indoor ────────────────────────────────────────
+      {
+        id: 205, name: "Suska", day: "Sa 18.07",
+        contact: [{ name: "Philipp Suska", phone: "+49 176 62993739" }],
+        rider: "4x Wasser\n4x Bier\n4x Red Bull Vodka\n4x Club Mate Vodka\n2x Sparkling Wine Mate",
+        tech: "A&H 96 · 4x CDJ 3000",
+        setStart: "22:00", setEnd: "00:00", stage: "Floor II Indoor",
+        notes: "Kommt gemeinsam mit Vagabund B2B 909 – Pickup 21:15",
+        transfers: [{ time: "2026-07-18T21:15", from: "Hotel", to: "Venue", statusKey: "pickup_erledigt" }],
+      },
+      {
+        id: 206, name: "Afem Syko", day: "Sa 18.07",
+        contact: [{ name: "Matthias Waschitzek", phone: "+49 176 30109782" }],
+        rider: "2x Coconut Water\n4x Wasser still",
+        tech: "A&H 96 · 4x CDJ 3000",
+        setStart: "00:00", setEnd: "02:00", stage: "Floor II Indoor",
+        transfers: [],
+      },
+      {
+        id: 207, name: "Byorn", day: "Sa 18.07",
+        contact: [
+          { name: "Bjorn Verbeeck", phone: "+32 471 23 04 78" },
+          { name: "Kobe (Videographer)", phone: "+32 477 08 26 52" },
+        ],
+        rider: "6x Wasser still (Glas)\n6x Wasser sprudel (Glas)\nSoft Drinks\n6x Ginger Beer / Ginger Ale / Club Mate\n1x Vodka Belvedere",
+        tech: "DJM A9 · 4x CDJ 3000",
+        setStart: "02:00", setEnd: "04:00", stage: "Floor II Indoor",
+        transfers: [{ time: "2026-07-19T01:15", from: "Hotel", to: "Venue", statusKey: "pickup_erledigt" }],
+      },
+      {
+        id: 208, name: "Neon Graveyard", day: "Sa 18.07",
+        contact: [{ name: "Martin Gruetter", phone: "+49 157 71436716" }],
+        rider: "3x Wasser still\n1x Vitamin Well Reload\n1x Ginger Shot\n1x Kaugummi",
+        tech: "A&H 96 · 4x CDJ 3000",
+        setStart: "04:00", setEnd: "06:00", stage: "Floor II Indoor",
+        notes: "Lokal",
+        transfers: [{ time: "2026-07-19T03:15", from: "Hotel", to: "Venue", statusKey: "pickup_erledigt" }],
+      },
+      // ── Sa 18.07 · Floor III Indoor ──────────────────────────────────────
+      {
+        id: 209, name: "Vagabund", day: "Sa 18.07",
+        contact: [
+          { name: "Malik Tahiri (Vagabund)", phone: "+49 151 25181340" },
+        ],
+        rider: "1x Sekt · 2x lokales Bier · 2x Club Mate\n2x Red Bull · 2x Wasser still (0,33L) · 1x Marlboro Gold",
+        tech: "A&H 96 · 4x CDJ 3000",
+        setStart: "22:00", setEnd: "01:00", stage: "Floor III Indoor",
+        notes: "Pickup 21:15 gemeinsam mit Suska",
+        transfers: [{ time: "2026-07-18T21:15", from: "Hotel", to: "Venue", statusKey: "pickup_erledigt" }],
+      },
+      {
+        id: 210, name: "909 Racing Team", day: "Sa 18.07",
+        contact: [
+          { name: "Mike Momburg (909)", phone: "+49 163 1948988" },
+          { name: "Domenik Deckert (909)", phone: "+49 1573 8272826" },
+        ],
+        rider: "Drink Tickets · Wasser · Säfte · Bier\n1x Premium Vodka · 1x Prosecco\n4x Mate Lemonade · 4x Red Bull · Marlboro Gold",
+        tech: "A&H 96 · 4x CDJ 3000",
+        setStart: "01:00", setEnd: "04:00", stage: "Floor III Indoor",
+        transfers: [{ time: "2026-07-19T00:15", from: "Hotel", to: "Venue", statusKey: "pickup_erledigt" }],
+      },
+    ];
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // TRAVEL DATA (Inbound / Outbound)
+    // ─────────────────────────────────────────────────────────────────────────
+    const INBOUND = [
+      // 17.07
+      { id:"in-hana",       day:"17.07", artist:"Haná",             contact:"Hannah Charlotte Opgaard", phone:"+447710268053",   mode:"Eigene Anreise (Auto)", from:"–",                  pickupTime:"–" },
+      { id:"in-adrianmills",day:"17.07", artist:"Adrian Mills",      contact:"Adrian Ortíz",             phone:"+4917632123985",  mode:"Zu Fuß",                from:"Dortmund HBF",       pickupTime:"–" },
+      { id:"in-cloudy",     day:"17.07", artist:"Cloudy",            contact:"Claudia Koziolek",         phone:"+4917647650659",  mode:"Zu Fuß",                from:"Dortmund HBF",       pickupTime:"–" },
+      { id:"in-jschuster",  day:"17.07", artist:"Johannes Schuster", contact:"Johannes Schuster",        phone:"+491743391958",   mode:"Zu Fuß",                from:"Dortmund HBF",       pickupTime:"–" },
+      { id:"in-kander",     day:"17.07", artist:"Kander",            contact:"Alex Harrison",            phone:"+447711921808",   mode:"Zu Fuß",                from:"Dortmund HBF",       pickupTime:"18:12" },
+      { id:"in-ani",        day:"17.07", artist:"A.N.I.",            contact:"Ersin Akgül",              phone:"+4917670584700",  mode:"Eigene Anreise (Auto)", from:"–",                  pickupTime:"–" },
+      // 18.07
+      { id:"in-aerae",      day:"18.07", artist:"Aerea",             contact:"Carlota / Ruben",          phone:"+34643178720",    mode:"Royal Transfer",        from:"Dortmund Flughafen", pickupTime:"11:50", notes:"Flug W61093" },
+      { id:"in-nikolina",   day:"18.07", artist:"Nikolina",          contact:"Ronja Hauck",              phone:"+4917624885054",  mode:"Royal Transfer",        from:"Sheraton Düsseldorf",pickupTime:"–" },
+      { id:"in-kloud",      day:"18.07", artist:"Kloud",             contact:"Kloud",                    phone:"+18189700710",    mode:"–",                     from:"–",                  pickupTime:"–" },
+      { id:"in-suska",      day:"18.07", artist:"Suska",             contact:"Philipp Suska",            phone:"+4917662993739",  mode:"Zu Fuß",                from:"Dortmund HBF",       pickupTime:"–" },
+      { id:"in-afemsyko",   day:"18.07", artist:"Afem Syko",         contact:"Matthias Waschitzek",      phone:"+4917630109782",  mode:"Royal Transfer",        from:"Sheraton Düsseldorf",pickupTime:"22:30" },
+      { id:"in-byorn",      day:"18.07", artist:"Byorn",             contact:"Bjorn Verbeeck",           phone:"+32471230478",    mode:"Eigene Anreise (Auto)", from:"–",                  pickupTime:"–" },
+      { id:"in-neongy",     day:"18.07", artist:"Neon Graveyard",    contact:"Martin Gruetter",          phone:"+4915771436716",  mode:"Zu Fuß",                from:"Dortmund HBF",       pickupTime:"19:21" },
+    ];
+
+    const OUTBOUND = [
+      // 18.07
+      { id:"out-hana",       day:"18.07", artist:"Haná",             contact:"Hannah Charlotte Opgaard", phone:"+447710268053",  mode:"Eigene Abreise (Auto)", to:"–",                    pickupTime:"–" },
+      { id:"out-adrianmills",day:"18.07", artist:"Adrian Mills",     contact:"Adrian Ortíz",             phone:"+4917632123985", mode:"Zu Fuß",                to:"Dortmund HBF",         pickupTime:"–" },
+      { id:"out-cloudy",     day:"18.07", artist:"Cloudy",           contact:"Claudia Koziolek",         phone:"+4917647650659", mode:"Zu Fuß",                to:"Dortmund HBF",         pickupTime:"–" },
+      { id:"out-jschuster",  day:"18.07", artist:"Johannes Schuster",contact:"Johannes Schuster",        phone:"+491743391958",  mode:"Zu Fuß",                to:"Dortmund HBF",         pickupTime:"–" },
+      { id:"out-kander",     day:"18.07", artist:"Kander",           contact:"Alex Harrison",            phone:"+447711921808",  mode:"Zu Fuß",                to:"Dortmund HBF",         pickupTime:"13:36" },
+      { id:"out-ani",        day:"18.07", artist:"A.N.I.",           contact:"Ersin Akgül",              phone:"+4917670584700", mode:"Eigene Abreise (Auto)", to:"–",                    pickupTime:"–" },
+      { id:"out-nikolina",   day:"18.07", artist:"Nikolina",         contact:"Ronja Hauck",              phone:"+4917624885054", mode:"Royal Transfer",        to:"Sheraton Düsseldorf",  pickupTime:"20:05", pickupFrom:"Junkyard" },
+      { id:"out-aerae",      day:"18.07", artist:"Aerea",            contact:"Carlota / Ruben",          phone:"+34643178720",   mode:"Royal Transfer",        to:"Düsseldorf Flughafen", pickupTime:"16:30" },
+      // 19.07
+      { id:"out-kloud",      day:"19.07", artist:"Kloud",            contact:"Kloud",                    phone:"+18189700710",   mode:"Zu Fuß",                to:"Dortmund HBF",         pickupTime:"–" },
+      { id:"out-suska",      day:"19.07", artist:"Suska",            contact:"Philipp Suska",            phone:"+4917662993739", mode:"Zu Fuß",                to:"Dortmund HBF",         pickupTime:"–" },
+      { id:"out-afemsyko",   day:"19.07", artist:"Afem Syko",        contact:"Matthias Waschitzek",      phone:"+4917630109782", mode:"Zu Fuß",                to:"Dortmund HBF",         pickupTime:"–" },
+      { id:"out-byorn",      day:"19.07", artist:"Byorn",            contact:"Bjorn Verbeeck",           phone:"+32471230478",   mode:"Eigene Abreise (Auto)", to:"NH Hotel → eigen",     pickupTime:"–" },
+      { id:"out-neongy",     day:"19.07", artist:"Neon Graveyard",   contact:"Martin Gruetter",          phone:"+4915771436716", mode:"Zu Fuß",                to:"Dortmund HBF",         pickupTime:"09:36" },
+    ];
+
+    // Special contacts not tied to artists
+    const SPECIAL_CONTACTS = [
+      { group: "Royal Transfer", name: "Mitat Dağ", phone: "+49 151 44365466", role: "Fahrer" },
+    ];
+
+    const GLOBAL_NOTES = [
+      { emoji: "🌀", text: "Mainfloor Outdoor: mind. 2 Ventilatoren zwingend an BEIDEN Tagen aufbauen" },
+      { emoji: "⚠️", text: "Kloud: bleibt anonym / trägt Maske – separaten Raum oberhalb Backstage einrichten" },
+      { emoji: "🎫", text: "Junkyard Backstage klein: Artist + Crew + 1 Gast. Gäste konsequent rausschmeißen wenn sie ewig abhängen – Artists brauchen Platz zum Setzen" },
+      { emoji: "📵", text: "Handyverbot – Einlasspersonal beim Stickern explizit darauf hinweisen, Gäste auf das Verbot hinweisen. Im Zweifel Verweis von der Veranstaltung." },
+      { emoji: "🎥", text: "Kein Multicam auf Mainfloor Outdoor. Indoor erlaubt (inkl. Multicam). Keinem Videographen / Artist wurde Multicam für Mainfloor Outdoor gestattet." },
+      { emoji: "🕐", text: "Wer im Junkyard aufmacht, checkt als Erstes aus. Wer zumacht, fängt Samstag später an." },
+    ];
+
+    const DAYS = ["Fr 17.07", "Sa 18.07"];
+    const FLOORS = {
+      "Fr 17.07": ["Floor I Outdoor", "Floor II Indoor", "Floor III Indoor"],
+      "Sa 18.07":  ["Floor I Outdoor", "Floor II Indoor", "Floor III Indoor"],
+    };
+    const FLOOR_ACCENT = {
+      "Floor I Outdoor":   { text: "text-orange-400", bg: "bg-orange-500",  border: "border-orange-500/30" },
+      "Floor II Indoor":    { text: "text-red-400",    bg: "bg-red-500",     border: "border-red-500/30" },
+      "Floor III Indoor":  { text: "text-violet-400", bg: "bg-violet-500",  border: "border-violet-500/30" },
+      "Mainfloor Outdoor": { text: "text-orange-400", bg: "bg-orange-500",  border: "border-orange-500/30" },
+      "Junkyard":          { text: "text-violet-400", bg: "bg-violet-500",  border: "border-violet-500/30" },
+    };
+
+    // Status keys that exist
+    const ALL_STATUS_KEYS = [
+      "pickup_erledigt", "pickup2_erledigt", "pickup3_erledigt",
+      "im_club", "rider_ausgehaendigt", "soundcheck_ok",
+      "set_begonnen", "set_beendet", "aus_club",
+    ];
+    const STATUS_LABELS = {
+      pickup_erledigt:     "🚗 Pickup erledigt",
+      pickup2_erledigt:    "🚗 Pickup 2 erledigt",
+      pickup3_erledigt:    "🚗 Pickup 3 erledigt",
+      im_club:             "🎧 Im Club",
+      rider_ausgehaendigt: "🎁 Rider ausgehändigt",
+      soundcheck_ok:       "🎛️ Soundcheck ✓",
+      set_begonnen:        "▶️ Set begonnen",
+      set_beendet:         "🎉 Set beendet",
+      aus_club:            "🚪 Aus Club",
+    };
+
+    // Which status keys are relevant for a given artist
+    const getKeys = (a) => {
+      const keys = [];
+      if (a.transfers?.some(t => t.statusKey === "pickup_erledigt"))  keys.push("pickup_erledigt");
+      if (a.transfers?.some(t => t.statusKey === "pickup2_erledigt")) keys.push("pickup2_erledigt");
+      if (a.transfers?.some(t => t.statusKey === "pickup3_erledigt")) keys.push("pickup3_erledigt");
+      keys.push("im_club", "rider_ausgehaendigt");
+      if (a.soundcheck) keys.push("soundcheck_ok");
+      keys.push("set_begonnen", "set_beendet", "aus_club");
+      return keys;
+    };
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // HELPERS
+    // ─────────────────────────────────────────────────────────────────────────
+    const toMins = t => {
+      if (!t) return 9999;
+      const [h, m] = t.split(":").map(Number);
+      return (h < 12 ? h + 24 : h) * 60 + m;
+    };
+    const fmtTime = dt => {
+      try { return new Date(dt).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }); }
+      catch { return dt || "–"; }
+    };
+    const initStatus = () => {
+      const s = {};
+      ARTISTS.forEach(a => { s[a.id] = {}; ALL_STATUS_KEYS.forEach(k => s[a.id][k] = false); });
+      return s;
+    };
+    const loadStorage = (key, fallback) => {
+      try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; }
+      catch { return fallback; }
+    };
+    const saveStorage = (key, val) => { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} };
+
+    // ── Firebase sync helpers ────────────────────────────────────────────────
+    // Writes only a single leaf so concurrent edits don't overwrite each other
+    const fbSet = (path, value) => {
+      if (!db) return;
+      db.ref(path).set(value);
+    };
+    const fbSubscribe = (path, cb) => {
+      if (!db) return () => {};
+      const ref = db.ref(path);
+      ref.on("value", snap => cb(snap.val()));
+      return () => ref.off("value");
+    };
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // ATOMS
+    // ─────────────────────────────────────────────────────────────────────────
+    function Dot({ on }) {
+      return <span className={`inline-block w-2 h-2 rounded-full flex-shrink-0 transition-colors ${on ? "bg-emerald-400" : "bg-zinc-700"}`} />;
+    }
+
+    function CheckBtn({ label, checked, onChange }) {
+      return (
+        <button onClick={() => onChange(!checked)}
+          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all border select-none
+            ${checked
+              ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300 line-through decoration-emerald-500"
+              : "bg-zinc-800/60 border-zinc-700 text-zinc-400 active:bg-zinc-700"}`}>
+          <span className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 transition-all
+            ${checked ? "bg-emerald-500 border-emerald-500" : "border-zinc-600"}`}>
+            {checked && <span className="text-black text-xs font-black leading-none">✓</span>}
+          </span>
+          {label}
+        </button>
+      );
+    }
+
+    function ProgressBar({ artist, status }) {
+      const s = status[artist.id] || {};
+      const keys = getKeys(artist);
+      const pct = Math.round(keys.filter(k => s[k]).length / keys.length * 100);
+      return (
+        <div className="flex items-center gap-2 mt-1">
+          <div className="flex-1 h-1 bg-zinc-800 rounded-full overflow-hidden">
+            <div className="h-full bg-gradient-to-r from-amber-500 to-emerald-500 rounded-full transition-all duration-500"
+              style={{ width: pct + "%" }} />
+          </div>
+          <span className="text-[10px] text-zinc-600 mono w-6 text-right">{pct}%</span>
+        </div>
+      );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // ARTIST CARD
+    // ─────────────────────────────────────────────────────────────────────────
+    function ACard({ a, status, setStatus, showStage }) {
+      const s = status[a.id] || {};
+      const isActive = s.im_club && !s.set_beendet;
+      const isDone   = s.set_beendet;
+      const acc = FLOOR_ACCENT[a.stage] || { text: "text-zinc-500" };
+      const keys = getKeys(a);
+
+      const toggle = useCallback((k, v) => {
+        setStatus(prev => ({ ...prev, [a.id]: { ...prev[a.id], [k]: v } }));
+      }, [a.id, setStatus]);
+
+      return (
+        <div className={`rounded-xl border transition-all
+          ${isDone   ? "border-zinc-800/60 opacity-50"
+          : isActive  ? "border-emerald-600/60 bg-emerald-950/20"
+                      : "border-zinc-800 bg-zinc-900/60"}`}>
+
+          {/* Header row */}
+          <div className="flex items-center gap-3 px-4 py-3">
+            <div className="text-center flex-shrink-0 w-14">
+              <div className="text-amber-400 font-black text-sm mono">{a.setStart}</div>
+              <div className="text-zinc-600 text-xs mono">–{a.setEnd}</div>
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <Dot on={isActive} />
+                <span className="font-bold text-zinc-100 text-sm">{a.name}</span>
+                {showStage && <span className={`text-[10px] mono ${acc.text}`}>{a.stage}</span>}
+                {a.soundcheck && (
+                  <span className="text-xs bg-violet-500/20 text-violet-300 border border-violet-500/30 px-1.5 py-0.5 rounded mono">
+                    SC {a.soundcheck}
+                  </span>
+                )}
+                {a.tech && (
+                  <span className="text-[10px] text-zinc-600 border border-zinc-800 px-1.5 py-0.5 rounded mono">{a.tech}</span>
+                )}
+                {a.notes?.startsWith("⚠️") && (
+                  <span className="text-xs bg-red-500/20 text-red-300 border border-red-500/30 px-1.5 py-0.5 rounded">⚠️</span>
+                )}
+              </div>
+              <ProgressBar artist={a} status={status} />
+            </div>
+          </div>
+
+          {/* Notes */}
+          {a.notes && (
+            <div className="px-4 pb-1.5 text-xs text-amber-300/80 mono leading-relaxed">{a.notes}</div>
+          )}
+
+          {/* Checkliste */}
+          <div className="px-4 pb-3 flex flex-wrap gap-1.5">
+            {keys.map(k => (
+              <CheckBtn key={k} label={STATUS_LABELS[k]} checked={!!s[k]} onChange={v => toggle(k, v)} />
+            ))}
+          </div>
+
+          {/* Rider (collapsible) */}
+          {a.rider && (
+            <details className="px-4 pb-3 group">
+              <summary className="text-xs text-zinc-500 cursor-pointer hover:text-zinc-300 select-none flex items-center gap-1.5">
+                <span className="text-zinc-700 group-open:rotate-90 transition-transform inline-block">▶</span>
+                🎁 Rider anzeigen
+              </summary>
+              <div className="mt-2 text-xs text-zinc-400 whitespace-pre-line bg-zinc-800/50 rounded-lg p-3 mono leading-relaxed">
+                {a.rider}
+              </div>
+            </details>
+          )}
+
+          {/* Contacts quick-dial */}
+          {a.contact?.some(c => c.phone) && (
+            <div className="px-4 pb-3 flex flex-wrap gap-1.5">
+              {a.contact.filter(c => c.phone).map((c, i) => (
+                <a key={i} href={`tel:${c.phone.replace(/[\s()\-]/g, "")}`}
+                  className="text-xs bg-zinc-800 border border-zinc-700 text-zinc-400 active:text-amber-400 px-2.5 py-1 rounded-lg flex items-center gap-1.5 transition-colors">
+                  📞 {c.name}
+                </a>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // OVERVIEW VIEW
+    // ─────────────────────────────────────────────────────────────────────────
+    function OverviewView({ status, setStatus, dayFilter }) {
+      const artists = ARTISTS
+        .filter(a => a.day === dayFilter)
+        .sort((a, b) => toMins(a.setStart) - toMins(b.setStart));
+      return (
+        <div className="space-y-2">
+          {artists.map(a => (
+            <ACard key={a.id} a={a} status={status} setStatus={setStatus} showStage={true} />
+          ))}
+        </div>
+      );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // CLUB VIEW
+    // ─────────────────────────────────────────────────────────────────────────
+    function TimelineBar({ artists, now, stage }) {
+      const acc = FLOOR_ACCENT[stage] || { bg: "bg-zinc-500" };
+      const sorted = [...artists].sort((a, b) => toMins(a.setStart) - toMins(b.setStart));
+      const nowH = now.getHours();
+      const nowM = (nowH < 12 ? nowH + 24 : nowH) * 60 + now.getMinutes();
+      const allM = sorted.flatMap(a => [toMins(a.setStart), toMins(a.setEnd)]);
+      if (!allM.length) return null;
+      const minT = Math.min(...allM) - 15, maxT = Math.max(...allM) + 15, span = maxT - minT;
+      const pct = m => ((m - minT) / span * 100).toFixed(2);
+      const showNow = nowM >= minT && nowM <= maxT;
+      return (
+        <div className="relative h-1.5 bg-zinc-800 rounded-full mb-4 mt-1">
+          {sorted.map(a => (
+            <div key={a.id} className={`absolute h-full rounded-full opacity-70 ${acc.bg}`}
+              style={{ left: pct(toMins(a.setStart)) + "%", width: Math.max(1, pct(toMins(a.setEnd)) - pct(toMins(a.setStart))) + "%" }} />
+          ))}
+          {showNow && (
+            <div className="absolute top-1/2 w-0.5 h-4 bg-amber-400 rounded-full z-10"
+              style={{ left: pct(nowM) + "%", transform: "translateX(-50%) translateY(-50%)" }}>
+              <div className="absolute -top-5 left-1/2 -translate-x-1/2 text-[9px] mono text-amber-400 whitespace-nowrap bg-zinc-950 px-1 rounded border border-amber-500/30">
+                {now.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function ClubView({ status, setStatus, dayFilter }) {
+      const [activeFloor, setActiveFloor] = useState("Alle");
+      const [now, setNow] = useState(new Date());
+      const gridRef = useRef(null);
+
+      // Update every minute
+      useEffect(() => {
+        const id = setInterval(() => setNow(new Date()), 60000);
+        return () => clearInterval(id);
+      }, []);
+
+      const floors = FLOORS[dayFilter] || [];
+      const all = ARTISTS.filter(a => a.day === dayFilter);
+      const byStage = s => all.filter(a => a.stage === s).sort((a, b) => toMins(a.setStart) - toMins(b.setStart));
+      const nowH = now.getHours();
+      const nowM = (nowH < 12 ? nowH + 24 : nowH) * 60 + now.getMinutes();
+
+      // ── Timeline grid for "Alle" view ──────────────────────────────────────
+      const PX = 1.4; // px per minute
+      const PAD = 45; // top/bottom padding in minutes
+      const allArtists = floors.flatMap(f => byStage(f));
+      const allM = allArtists.flatMap(a => [toMins(a.setStart), toMins(a.setEnd)]);
+      const gMin = (allM.length ? Math.min(Math.min(...allM), nowM) : nowM) - PAD;
+      const gMax = (allM.length ? Math.max(Math.max(...allM), nowM) : nowM) + PAD;
+      const totalH = (gMax - gMin) * PX;
+      const toY = m => (m - gMin) * PX;
+
+      // Time labels every 2h
+      const timeLabels = [];
+      for (let h = Math.floor(gMin / 60); h <= Math.ceil(gMax / 60); h++) {
+        const m = h * 60;
+        if (m >= gMin && m <= gMax && h % 2 === 0) {
+          const dh = h >= 24 ? h - 24 : h;
+          timeLabels.push({ m, y: toY(m), label: String(dh).padStart(2, "0") + ":00" });
+        }
+      }
+      const showNow = nowM >= gMin && nowM <= gMax;
+
+      const getKeys = (a) => {
+        const keys = [];
+        if (a.transfers?.some(t => t.statusKey === "pickup_erledigt"))  keys.push("pickup_erledigt");
+        if (a.transfers?.some(t => t.statusKey === "pickup2_erledigt")) keys.push("pickup2_erledigt");
+        if (a.transfers?.some(t => t.statusKey === "pickup3_erledigt")) keys.push("pickup3_erledigt");
+        keys.push("im_club", "rider_ausgehaendigt");
+        if (a.soundcheck) keys.push("soundcheck_ok");
+        keys.push("set_begonnen", "set_beendet", "aus_club");
+        return keys;
+      };
+
+      const renderList = (artists) => (
+        <div className="space-y-2">
+          {artists.map((a, i, arr) => {
+            const prev = arr[i - 1];
+            const insertNow = prev && toMins(prev.setEnd) <= nowM && nowM < toMins(a.setStart);
+            return (
+              <div key={a.id}>
+                {insertNow && (
+                  <div className="flex items-center gap-2 my-1.5">
+                    <div className="flex-1 h-px bg-amber-500/40" />
+                    <span className="text-[10px] mono text-amber-400 bg-zinc-950 px-2 border border-amber-500/30 rounded">
+                      ▶ Jetzt {now.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}
+                    </span>
+                    <div className="flex-1 h-px bg-amber-500/40" />
+                  </div>
+                )}
+                <ACard a={a} status={status} setStatus={setStatus} showStage={false} />
+              </div>
+            );
+          })}
+        </div>
+      );
+
+      return (
+        <div>
+          {/* Floor tabs */}
+          <div className="flex gap-1 mb-4 bg-zinc-900 rounded-xl p-1 border border-zinc-800 overflow-x-auto">
+            {["Alle", ...floors].map(f => {
+              const acc = FLOOR_ACCENT[f];
+              return (
+                <button key={f} onClick={() => setActiveFloor(f)}
+                  className={`flex-shrink-0 px-3 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap
+                    ${activeFloor === f
+                      ? acc ? `bg-zinc-800 ${acc.text}` : "bg-zinc-700 text-zinc-100"
+                      : "text-zinc-500 active:text-zinc-300"}`}>
+                  {f}
+                </button>
+              );
+            })}
+          </div>
+
+          {activeFloor === "Alle" ? (
+            /* ── TIMELINE GRID ─────────────────────────────────────── */
+            <div ref={el => {
+              // Auto-scroll to current time on mount, centered in viewport
+              if (el && showNow) {
+                const scrollTarget = toY(nowM) - window.innerHeight * 0.35;
+                el.closest('.overflow-y-auto')?.scrollTo({ top: Math.max(0, scrollTarget), behavior: 'smooth' });
+              }
+            }} className="relative flex" style={{ height: totalH }}>
+              {/* Time axis */}
+              <div className="flex-shrink-0 w-10 relative">
+                {timeLabels.map(({ m, y, label }) => (
+                  <div key={m} className="absolute right-1 text-[9px] mono text-zinc-600 -translate-y-1/2 whitespace-nowrap" style={{ top: y }}>
+                    {label}
+                  </div>
+                ))}
+              </div>
+
+              {/* Grid lines + now line (shared, behind columns) */}
+              <div className="absolute inset-0 left-10 pointer-events-none">
+                {timeLabels.map(({ m, y }) => (
+                  <div key={m} className="absolute left-0 right-0 border-t border-zinc-800/50" style={{ top: y }} />
+                ))}
+                {showNow && (
+                  <div className="absolute left-0 right-0 z-20" style={{ top: toY(nowM) }}>
+                    {/* Glowing line */}
+                    <div className="absolute left-0 right-0 h-0.5 bg-amber-400"
+                      style={{ boxShadow: "0 0 6px 1px rgba(251,191,36,0.5)" }} />
+                    {/* Pill label */}
+                    <div className="absolute -left-0.5 -top-3 flex items-center gap-1 bg-amber-500 text-black text-[9px] font-bold mono px-1.5 py-0.5 rounded-full whitespace-nowrap z-30"
+                      style={{ boxShadow: "0 0 8px 2px rgba(251,191,36,0.4)" }}>
+                      <span className="w-1.5 h-1.5 rounded-full bg-black animate-pulse inline-block" />
+                      {now.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Floor columns */}
+              {floors.map(stage => {
+                const acc = FLOOR_ACCENT[stage] || { text: "text-zinc-500", bg: "bg-zinc-500", border: "border-zinc-700" };
+                const stagePl = byStage(stage);
+                return (
+                  <div key={stage} className="flex-1 relative border-l border-zinc-800 min-w-0 overflow-hidden" style={{ height: totalH }}>
+                    {/* Column header */}
+                    <div className={`sticky top-0 z-10 text-[9px] font-bold tracking-widest uppercase px-1.5 py-1 bg-zinc-950/90 ${acc.text}`}>
+                      {stage.replace("Floor ", "F")}
+                    </div>
+                    {/* Artist blocks */}
+                    {stagePl.map(a => {
+                      const top = toY(toMins(a.setStart));
+                      const height = Math.max(28, (toMins(a.setEnd) - toMins(a.setStart)) * PX);
+                      const keys = getKeys(a);
+                      const done = keys.filter(k => status?.[a.id]?.[k]).length;
+                      const pct = keys.length ? done / keys.length * 100 : 0;
+                      return (
+                        <button key={a.id} onClick={() => setActiveFloor(stage)}
+                          className={`absolute left-1 right-1 rounded-lg border overflow-hidden text-left active:opacity-70 transition-opacity ${acc.border} bg-zinc-900`}
+                          style={{ top, height }}>
+                          <div className={`text-[10px] font-bold px-1.5 pt-1 truncate leading-tight ${acc.text}`}>{a.name}</div>
+                          <div className="text-[9px] mono text-zinc-600 px-1.5 leading-none">{a.setStart}–{a.setEnd}</div>
+                          {height > 44 && (
+                            <div className="px-1.5 mt-1">
+                              <div className="h-0.5 bg-zinc-800 rounded-full overflow-hidden">
+                                <div className={`h-full ${acc.bg} rounded-full transition-all`} style={{ width: pct + "%" }} />
+                              </div>
+                            </div>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            /* ── SINGLE FLOOR LIST ──────────────────────────────────── */
+            <div>
+              <TimelineBar artists={byStage(activeFloor)} now={now} stage={activeFloor} />
+              {renderList(byStage(activeFloor))}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // DRIVER VIEW
+    // ─────────────────────────────────────────────────────────────────────────
+    function DriverView({ status, setStatus, dayFilter, assignments, setAssignments }) {
+      const artists = ARTISTS.filter(a => a.day === dayFilter);
+
+      // Build flat transfer list with artist attached
+      const transfers = [];
+      artists.forEach(a => {
+        (a.transfers || []).forEach((t, idx) => {
+          transfers.push({ ...t, artist: a, key: `${a.id}-${idx}` });
+        });
+      });
+      transfers.sort((a, b) => new Date(a.time) - new Date(b.time));
+
+      const toggleAssign = (tKey, member) => {
+        setAssignments(prev => {
+          const curr = prev[tKey] || [];
+          return {
+            ...prev,
+            [tKey]: curr.includes(member) ? curr.filter(m => m !== member) : [...curr, member],
+          };
+        });
+      };
+
+      return (
+        <div>
+          {/* ── Unreal Team pickups ── */}
+          <div className="flex items-center gap-3 mb-4">
+            <span className="text-xs font-bold tracking-widest uppercase text-amber-400">⚡ Unreal Team</span>
+            <div className="flex-1 h-px bg-zinc-800" />
+            <div className="flex gap-1">
+              {UNREAL_TEAM.map(m => (
+                <span key={m} className="text-[10px] bg-amber-500/20 border border-amber-500/30 text-amber-300 px-1.5 py-0.5 rounded mono">{m}</span>
+              ))}
+            </div>
+          </div>
+
+          {transfers.length === 0 ? (
+            <div className="text-center py-8 text-zinc-600 text-xs">Keine Pickups für diesen Tag</div>
+          ) : (
+            <div className="relative mb-8">
+              <div className="absolute left-[3.6rem] top-0 bottom-0 w-px bg-zinc-800" />
+              {transfers.map(t => {
+                const s = status[t.artist.id] || {};
+                const done = s[t.statusKey];
+                const assigned = assignments[t.key] || [];
+                const firstPhone = t.artist.contact?.find(c => c.phone)?.phone;
+                const label = t.label || "Pickup";
+                return (
+                  <div key={t.key} className={`relative flex items-start mb-2 transition-all ${done ? "opacity-40" : ""}`}>
+                    {/* Time */}
+                    <div className="flex-shrink-0 w-14 text-right pt-3 pr-2">
+                      <span className={`text-xs mono font-bold ${done ? "text-zinc-600" : "text-amber-400"}`}>
+                        {fmtTime(t.time)}
+                      </span>
+                    </div>
+                    {/* Dot */}
+                    <div className={`w-3 h-3 rounded-full mt-3 flex-shrink-0 z-10 border-2 transition-colors
+                      ${done ? "bg-zinc-700 border-zinc-600" : "bg-amber-500 border-amber-300"}`} />
+                    {/* Card */}
+                    <div className={`flex-1 ml-3 rounded-xl border px-3 py-2.5 transition-all
+                      ${done ? "border-zinc-800 bg-zinc-900/20" : "border-zinc-800 bg-zinc-900/80"}`}>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-bold text-zinc-100 text-sm">{t.artist.name}</span>
+                            <span className="text-[10px] bg-amber-500/20 border border-amber-500/30 text-amber-300 px-1.5 py-0.5 rounded mono">
+                              {label} → {t.to}
+                            </span>
+                          </div>
+                          <div className="text-xs text-zinc-500 mt-0.5 mono">{t.from} → {t.to}</div>
+                          {/* Team assignment */}
+                          <div className="flex gap-1.5 mt-2 flex-wrap">
+                            {UNREAL_TEAM.map(m => (
+                              <button key={m} onClick={() => toggleAssign(t.key, m)}
+                                className={`text-xs px-2.5 py-0.5 rounded-full mono border transition-all select-none
+                                  ${assigned.includes(m)
+                                    ? "bg-amber-500 border-amber-400 text-black font-bold"
+                                    : "bg-zinc-800 border-zinc-700 text-zinc-500 active:border-zinc-500"}`}>
+                                {m}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        {firstPhone && (
+                          <a href={`tel:${firstPhone.replace(/[\s()\-]/g, "")}`}
+                            className="text-zinc-600 active:text-amber-400 text-xl flex-shrink-0 mt-0.5 transition-colors">
+                            📞
+                          </a>
+                        )}
+                      </div>
+                      <div className="mt-2.5">
+                        <CheckBtn label="✅ Pickup erledigt" checked={!!done}
+                          onChange={v => setStatus(prev => ({ ...prev, [t.artist.id]: { ...prev[t.artist.id], [t.statusKey]: v } }))} />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* ── Venue to Hotel ── */}
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 mb-6">
+            <div className="text-xs font-bold tracking-widest uppercase text-zinc-500 mb-1.5">🏨 Venue → Hotel</div>
+            <div className="text-xs text-zinc-400 leading-relaxed">Absprache direkt mit jedem Artist – individuell und flexibel klären.</div>
+          </div>
+
+          {/* ── Royal Transfer ── */}
+          <div>
+            <div className="flex items-center gap-3 mb-3">
+              <span className="text-xs font-bold tracking-widest uppercase text-sky-400">🚕 Royal Transfer</span>
+              <div className="flex-1 h-px bg-zinc-800" />
+            </div>
+            <div className="rounded-xl border border-sky-500/20 bg-sky-500/5 p-4 flex items-center justify-between">
+              <div>
+                <div className="text-sm font-bold text-zinc-100">Mitat Dağ</div>
+                <div className="text-xs text-zinc-500 mono mt-0.5">Externe Transfers koordinieren</div>
+              </div>
+              <a href="tel:+4915144365466"
+                className="text-xl text-sky-400 active:text-sky-300 transition-colors">
+                📞
+              </a>
+            </div>
+            <div className="text-xs text-zinc-600 mono mt-1.5 px-1">+49 151 44365466</div>
+          </div>
+        </div>
+      );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // CONTACTS VIEW
+    // ─────────────────────────────────────────────────────────────────────────
+    function ContactsView({ dayFilter }) {
+      const [search, setSearch] = useState("");
+
+      const entries = [];
+      ARTISTS.filter(a => a.day === dayFilter || !dayFilter).forEach(a => {
+        (a.contact || []).forEach(c => {
+          if (c.phone) entries.push({ artist: a.name, name: c.name, phone: c.phone, stage: a.stage, day: a.day });
+        });
+      });
+      SPECIAL_CONTACTS.forEach(c => {
+        entries.push({ artist: c.group, name: c.name, phone: c.phone, stage: c.role, day: "–" });
+      });
+
+      const q = search.toLowerCase();
+      const filtered = entries.filter(e =>
+        !search || e.artist.toLowerCase().includes(q) || e.name.toLowerCase().includes(q) || e.phone.includes(q)
+      );
+
+      return (
+        <div>
+          <input
+            type="search"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Name oder Artist suchen…"
+            className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-2.5 text-sm text-zinc-100 placeholder-zinc-600 mb-4 outline-none focus:border-amber-500/50 mono transition-colors"
+          />
+          <div className="space-y-1.5">
+            {filtered.map((c, i) => (
+              <a key={i} href={`tel:${c.phone.replace(/[\s()\-]/g, "")}`}
+                className="flex items-center gap-3 bg-zinc-900/70 border border-zinc-800 rounded-xl px-4 py-3 active:border-zinc-600 transition-all group">
+                <div className="w-9 h-9 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center text-zinc-400 font-bold flex-shrink-0 text-sm">
+                  {c.artist.charAt(0).toUpperCase()}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[10px] text-zinc-600 mono truncate">{c.artist}</div>
+                  <div className="text-sm font-medium text-zinc-200 truncate">{c.name}</div>
+                </div>
+                <div className="text-right flex-shrink-0">
+                  <div className="text-xs mono text-zinc-500">{c.phone}</div>
+                  <div className={`text-[10px] ${FLOOR_ACCENT[c.stage]?.text || "text-zinc-700"}`}>{c.stage}</div>
+                </div>
+                <span className="text-xl text-zinc-600 group-active:text-amber-400 transition-colors ml-1">📞</span>
+              </a>
+            ))}
+            {filtered.length === 0 && (
+              <div className="text-center py-8 text-zinc-600 text-sm">Keine Treffer</div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // NOTES VIEW
+    // ─────────────────────────────────────────────────────────────────────────
+    function NotesView() {
+      return (
+        <div className="space-y-3">
+          {/* Global notes */}
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
+            <div className="text-xs font-bold tracking-widest uppercase text-zinc-500 mb-4">📋 Wichtige Notizen</div>
+            <div className="space-y-3.5">
+              {GLOBAL_NOTES.map((n, i) => (
+                <div key={i} className="flex gap-3">
+                  <span className="text-base flex-shrink-0 leading-tight mt-0.5">{n.emoji}</span>
+                  <span className="text-sm text-zinc-300 leading-relaxed">{n.text}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Team */}
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
+            <div className="text-xs font-bold tracking-widest uppercase text-amber-400 mb-3">⚡ Unreal Team</div>
+            <div className="flex gap-2 flex-wrap">
+              {UNREAL_TEAM.map(m => (
+                <span key={m} className="text-sm bg-amber-500/20 border border-amber-500/30 text-amber-300 px-3 py-1.5 rounded-lg mono">{m}</span>
+              ))}
+            </div>
+          </div>
+
+          {/* Royal Transfer */}
+          <div className="rounded-xl border border-sky-500/20 bg-sky-500/5 p-4 flex items-center justify-between">
+            <div>
+              <div className="text-xs font-bold tracking-widest uppercase text-sky-400 mb-1">🚕 Royal Transfer</div>
+              <div className="text-sm text-zinc-200">Mitat Dağ</div>
+              <div className="text-xs mono text-zinc-500">+49 151 44365466</div>
+            </div>
+            <a href="tel:+4915144365466" className="text-2xl text-sky-400 active:text-sky-300 transition-colors">📞</a>
+          </div>
+
+          {/* Tech rider summary */}
+          {DAYS.map(day => {
+            const techArtists = ARTISTS.filter(a => a.tech && a.day === day);
+            if (!techArtists.length) return null;
+            return (
+              <div key={day} className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
+                <div className="text-xs font-bold tracking-widest uppercase text-zinc-500 mb-3">🎛️ Technik {day}</div>
+                <div className="space-y-1.5">
+                  {techArtists.map(a => (
+                    <div key={a.id} className="flex items-start justify-between gap-2">
+                      <span className="text-xs text-zinc-300 flex-shrink-0">{a.name}</span>
+                      <span className="text-[10px] mono text-zinc-500 border border-zinc-800 px-2 py-0.5 rounded text-right">{a.tech}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Floors info */}
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
+            <div className="text-xs font-bold tracking-widest uppercase text-zinc-500 mb-3">🏛️ Floors</div>
+            {Object.entries(FLOORS).map(([day, floors]) => (
+              <div key={day} className="mb-3 last:mb-0">
+                <div className="text-xs text-zinc-600 mono mb-1.5">{day}</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {floors.map(f => {
+                    const acc = FLOOR_ACCENT[f] || { text: "text-zinc-400", border: "border-zinc-700" };
+                    return (
+                      <span key={f} className={`text-xs px-2 py-0.5 rounded border ${acc.text} ${acc.border} bg-zinc-900`}>{f}</span>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // TRAVELS VIEW (Inbound / Outbound)
+    // ─────────────────────────────────────────────────────────────────────────
+    function TravelsView({ travelStatus, setTravelStatus }) {
+      const modeIcon = (mode) => {
+        if (mode.includes("Royal")) return "🚐";
+        if (mode.includes("Auto")) return "🚗";
+        if (mode === "Zu Fuß") return "🚶";
+        return "•";
+      };
+      const modeBadge = (mode) => {
+        if (mode.includes("Royal")) return "border-amber-700 text-amber-400";
+        if (mode.includes("Auto")) return "border-zinc-700 text-zinc-400";
+        if (mode === "Zu Fuß") return "border-zinc-800 text-zinc-500";
+        return "border-zinc-800 text-zinc-600";
+      };
+
+      const TravelCard = ({ entry, dir }) => {
+        const done = !!travelStatus[entry.id];
+        const toggle = () => setTravelStatus(prev => ({ ...prev, [entry.id]: !prev[entry.id] }));
+        return (
+          <div className={`rounded-xl border p-3 transition-all ${done ? "border-emerald-800/50 bg-emerald-950/20 opacity-70" : "border-zinc-800 bg-zinc-900/40"}`}>
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className={`text-sm font-bold ${done ? "line-through text-zinc-500" : "text-zinc-100"}`}>{entry.artist}</span>
+                  <span className={`text-[9px] mono border px-1.5 py-0.5 rounded ${modeBadge(entry.mode)}`}>{modeIcon(entry.mode)} {entry.mode}</span>
+                </div>
+                <div className="text-[10px] text-zinc-500 mono mt-1">{entry.contact}</div>
+                <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1.5">
+                  {entry.pickupTime && entry.pickupTime !== "–" && (
+                    <span className="text-[10px] mono text-amber-400">⏰ {entry.pickupTime}</span>
+                  )}
+                  {dir === "in" && entry.from && entry.from !== "–" && (
+                    <span className="text-[10px] mono text-zinc-400">📍 {entry.from}</span>
+                  )}
+                  {dir === "out" && entry.to && entry.to !== "–" && (
+                    <span className="text-[10px] mono text-zinc-400">→ {entry.to}</span>
+                  )}
+                  {dir === "out" && entry.pickupFrom && (
+                    <span className="text-[10px] mono text-zinc-500">von {entry.pickupFrom}</span>
+                  )}
+                  {entry.notes && (
+                    <span className="text-[10px] mono text-zinc-600">{entry.notes}</span>
+                  )}
+                </div>
+              </div>
+              <button onClick={toggle}
+                className={`w-7 h-7 rounded-lg flex-shrink-0 flex items-center justify-center border-2 transition-all active:scale-95 mt-0.5
+                  ${done ? "bg-emerald-600 border-emerald-600 text-white" : "bg-transparent border-zinc-700 text-transparent"}`}>
+                ✓
+              </button>
+            </div>
+          </div>
+        );
+      };
+
+      // Group by day
+      const inboundByDay  = {};
+      const outboundByDay = {};
+      INBOUND.forEach(e  => { (inboundByDay[e.day]  = inboundByDay[e.day]  || []).push(e); });
+      OUTBOUND.forEach(e => { (outboundByDay[e.day] = outboundByDay[e.day] || []).push(e); });
+
+      return (
+        <div className="space-y-6">
+          {/* ── INBOUND ───────────────────────────────────────────────── */}
+          <div>
+            <div className="text-xs font-bold tracking-widest uppercase text-amber-500 mb-3">✈ Inbound — Anreise</div>
+            <div className="space-y-4">
+              {Object.entries(inboundByDay).map(([day, entries]) => (
+                <div key={day}>
+                  <div className="text-[10px] mono text-zinc-600 uppercase tracking-widest mb-2 flex items-center gap-2">
+                    <span className="border-b border-zinc-800 flex-1" />
+                    <span>{day}</span>
+                    <span className="border-b border-zinc-800 flex-1" />
+                  </div>
+                  <div className="space-y-2">
+                    {entries.map(e => <TravelCard key={e.id} entry={e} dir="in" />)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* ── OUTBOUND ──────────────────────────────────────────────── */}
+          <div>
+            <div className="text-xs font-bold tracking-widest uppercase text-amber-500 mb-3">🚪 Outbound — Abreise</div>
+            <div className="space-y-4">
+              {Object.entries(outboundByDay).map(([day, entries]) => (
+                <div key={day}>
+                  <div className="text-[10px] mono text-zinc-600 uppercase tracking-widest mb-2 flex items-center gap-2">
+                    <span className="border-b border-zinc-800 flex-1" />
+                    <span>{day}</span>
+                    <span className="border-b border-zinc-800 flex-1" />
+                  </div>
+                  <div className="space-y-2">
+                    {entries.map(e => <TravelCard key={e.id} entry={e} dir="out" />)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // APP
+    // ─────────────────────────────────────────────────────────────────────────
+    const VIEWS = [
+      { id: "overview",  label: "Overview",  icon: "◎" },
+      { id: "club",      label: "Club",      icon: "🎧" },
+      { id: "driver",    label: "Fahrer",    icon: "🚗" },
+      { id: "travels",   label: "Reisen",    icon: "✈️" },
+      { id: "contacts",  label: "Kontakte",  icon: "📞" },
+      { id: "notes",     label: "Notizen",   icon: "📋" },
+    ];
+
+    function App() {
+      const [view,          setView]          = useState("overview");
+      const [dayFilter,     setDayFilter]     = useState("Sa 18.07");
+      const [status,        setStatus]        = useState(() => loadStorage("unreal_status_v2",       initStatus()));
+      const [assignments,   setAssignments]   = useState(() => loadStorage("unreal_assignments_v2",  {}));
+      const [travelStatus,  setTravelStatus]  = useState(() => loadStorage("unreal_travelstatus_v1", {}));
+      const [syncState,     setSyncState]     = useState(isFirebaseConfigured ? "connecting" : "offline");
+      // Prevent echo: skip writing back to Firebase when a change came FROM Firebase
+      const remoteUpdate = useRef(false);
+
+      // ── Firebase subscribe ───────────────────────────────────────────────
+      useEffect(() => {
+        if (!db) return;
+        const unsubStatus = fbSubscribe("unreal/status", val => {
+          if (!val) return;
+          remoteUpdate.current = true;
+          setStatus(prev => ({ ...initStatus(), ...val }));
+          saveStorage("unreal_status_v2", val);
+          setSyncState("live");
+        });
+        const unsubAssign = fbSubscribe("unreal/assignments", val => {
+          if (!val) return;
+          remoteUpdate.current = true;
+          setAssignments(val);
+          saveStorage("unreal_assignments_v2", val);
+        });
+        const unsubTravel = fbSubscribe("unreal/travelStatus", val => {
+          if (!val) return;
+          remoteUpdate.current = true;
+          setTravelStatus(val);
+          saveStorage("unreal_travelstatus_v1", val);
+        });
+        // Mark as live once connected
+        db.ref(".info/connected").on("value", snap => {
+          setSyncState(snap.val() ? "live" : "reconnecting");
+        });
+        return () => { unsubStatus(); unsubAssign(); unsubTravel(); };
+      }, []);
+
+      // ── Write to Firebase on local change ───────────────────────────────
+      // Granular writes: only update the single artist that changed
+      const setStatusSynced = useCallback((updater) => {
+        setStatus(prev => {
+          const next = typeof updater === "function" ? updater(prev) : updater;
+          if (remoteUpdate.current) { remoteUpdate.current = false; return next; }
+          // Find which artist changed and write only that leaf
+          Object.keys(next).forEach(id => {
+            if (JSON.stringify(next[id]) !== JSON.stringify(prev[id])) {
+              fbSet(`unreal/status/${id}`, next[id]);
+            }
+          });
+          saveStorage("unreal_status_v2", next);
+          return next;
+        });
+      }, []);
+
+      const setAssignmentsSynced = useCallback((updater) => {
+        setAssignments(prev => {
+          const next = typeof updater === "function" ? updater(prev) : updater;
+          if (remoteUpdate.current) { remoteUpdate.current = false; return next; }
+          fbSet("unreal/assignments", next);
+          saveStorage("unreal_assignments_v2", next);
+          return next;
+        });
+      }, []);
+
+      const setTravelStatusSynced = useCallback((updater) => {
+        setTravelStatus(prev => {
+          const next = typeof updater === "function" ? updater(prev) : updater;
+          if (remoteUpdate.current) { remoteUpdate.current = false; return next; }
+          // Granular: only write changed leaf
+          Object.keys(next).forEach(id => {
+            if (next[id] !== prev[id]) fbSet(`unreal/travelStatus/${id}`, next[id]);
+          });
+          saveStorage("unreal_travelstatus_v1", next);
+          return next;
+        });
+      }, []);
+
+      // ── Sync indicator dot ───────────────────────────────────────────────
+      const SyncDot = () => {
+        const cfg = {
+          live:          { color: "bg-emerald-400", pulse: true,  label: "Live" },
+          connecting:    { color: "bg-amber-400",   pulse: true,  label: "Verbinde…" },
+          reconnecting:  { color: "bg-amber-500",   pulse: true,  label: "Reconnecting…" },
+          offline:       { color: "bg-zinc-600",    pulse: false, label: "Lokal" },
+        }[syncState] || { color: "bg-zinc-600", pulse: false, label: "" };
+        return (
+          <div className="flex items-center gap-1.5" title={cfg.label}>
+            <span className={`w-1.5 h-1.5 rounded-full ${cfg.color} ${cfg.pulse ? "animate-pulse" : ""}`} />
+            <span className="text-[9px] text-zinc-600 mono">{cfg.label}</span>
+          </div>
+        );
+      };
+
+      // Overall progress for active day
+      const dayArtists = ARTISTS.filter(a => a.day === dayFilter);
+      const totalChecks = dayArtists.reduce((s, a) => s + getKeys(a).length, 0);
+      const doneChecks  = dayArtists.reduce((s, a) => s + getKeys(a).filter(k => status[a.id]?.[k]).length, 0);
+      const pct = totalChecks > 0 ? Math.round(doneChecks / totalChecks * 100) : 0;
+
+      const resetDay = () => {
+        if (!confirm(`Alle Checks für ${dayFilter} zurücksetzen?`)) return;
+        const ids = dayArtists.map(a => a.id);
+        setStatusSynced(prev => {
+          const next = { ...prev };
+          ids.forEach(id => { next[id] = {}; ALL_STATUS_KEYS.forEach(k => next[id][k] = false); });
+          return next;
+        });
+      };
+
+      return (
+        <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col max-w-4xl mx-auto"
+          style={{ fontFamily: "'IBM Plex Mono', 'Courier New', monospace" }}>
+          <style>{`
+            @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;700&family=Bebas+Neue&display=swap');
+            .bebas { font-family: 'Bebas Neue', sans-serif; letter-spacing: .08em; }
+          `}</style>
+
+          {/* ── HEADER ───────────────────────────────────────────────────── */}
+          <div className="sticky top-0 z-40 bg-zinc-950/95 backdrop-blur-sm border-b border-zinc-800">
+            <div className="px-4 pt-4 pb-2">
+              <div className="flex items-end justify-between">
+                <div>
+                  <div className="bebas text-4xl text-white leading-none tracking-wide">{EVENT_META.name}</div>
+                  <div className="text-xs text-zinc-500 mt-0.5">{EVENT_META.date} · {EVENT_META.city}</div>
+                </div>
+                <div className="text-right flex items-end gap-3">
+                  <button onClick={resetDay}
+                    className="text-xs text-zinc-700 hover:text-zinc-500 active:text-zinc-400 transition-colors pb-0.5">
+                    ↺
+                  </button>
+                  <div>
+                    <div className="text-2xl font-black text-amber-400 mono leading-none">{pct}%</div>
+                    <div className="text-[10px] text-zinc-600 mono">{doneChecks}/{totalChecks}</div>
+                  </div>
+                </div>
+              </div>
+              <div className="mt-2.5 h-1 bg-zinc-800 rounded-full overflow-hidden">
+                <div className="h-full bg-gradient-to-r from-amber-500 via-orange-400 to-emerald-500 rounded-full transition-all duration-700"
+                  style={{ width: pct + "%" }} />
+              </div>
+            </div>
+
+            {/* Day switcher */}
+            <div className="px-4 pb-2 flex gap-2">
+              {DAYS.map(d => (
+                <button key={d} onClick={() => setDayFilter(d)}
+                  className={`flex-1 py-1.5 rounded-lg text-xs font-bold border transition-all select-none
+                    ${dayFilter === d
+                      ? "bg-amber-500 border-amber-500 text-black"
+                      : "bg-zinc-900 border-zinc-700 text-zinc-400 active:text-zinc-200"}`}>
+                  {d}
+                </button>
+              ))}
+            </div>
+
+            {/* Nav tabs */}
+            <div className="flex border-t border-zinc-800">
+              {VIEWS.map(v => (
+                <button key={v.id} onClick={() => setView(v.id)}
+                  className={`flex-1 py-2.5 text-xs font-medium transition-all border-b-2 select-none
+                    ${view === v.id
+                      ? "border-amber-500 text-amber-400"
+                      : "border-transparent text-zinc-600 active:text-zinc-300"}`}>
+                  <div className="text-base leading-none">{v.icon}</div>
+                  <div className="text-[9px] mt-0.5 tracking-wide">{v.label}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* ── CONTENT ──────────────────────────────────────────────────── */}
+          <div className="flex-1 overflow-y-auto px-4 py-4 pb-10">
+            {view === "overview" && <OverviewView  status={status} setStatus={setStatusSynced} dayFilter={dayFilter} />}
+            {view === "club"     && <ClubView      status={status} setStatus={setStatusSynced} dayFilter={dayFilter} />}
+            {view === "driver"   && <DriverView    status={status} setStatus={setStatusSynced} dayFilter={dayFilter} assignments={assignments} setAssignments={setAssignmentsSynced} />}
+            {view === "travels"  && <TravelsView   travelStatus={travelStatus} setTravelStatus={setTravelStatusSynced} />}
+            {view === "contacts" && <ContactsView  dayFilter={dayFilter} />}
+            {view === "notes"    && <NotesView />}
+          </div>
+
+          {/* ── FOOTER ───────────────────────────────────────────────────── */}
+          <div className="border-t border-zinc-800 px-4 py-2 flex items-center justify-between flex-shrink-0">
+            <div className="flex items-center gap-3">
+              <span className="text-[10px] text-zinc-700">📱 Teilen → „Zum Home-Bildschirm"</span>
+              <SyncDot />
+            </div>
+            <span className="text-[10px] text-zinc-700 mono">{dayArtists.length} Artists · {dayFilter}</span>
+          </div>
+        </div>
+      );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // PIN SCREEN
+    // ─────────────────────────────────────────────────────────────────────────
+    const CORRECT_PIN = "8596";
+    const PIN_KEY = "unreal_pin_ok";
+
+    function PinScreen({ onUnlock }) {
+      const [digits, setDigits] = useState([]);
+      const [shake,  setShake]  = useState(false);
+      const [error,  setError]  = useState(false);
+
+      const press = (d) => {
+        if (digits.length >= 4) return;
+        const next = [...digits, d];
+        setDigits(next);
+        setError(false);
+        if (next.length === 4) {
+          if (next.join("") === CORRECT_PIN) {
+            setTimeout(onUnlock, 180);
+          } else {
+            setTimeout(() => { setShake(true); setError(true); setDigits([]); setTimeout(() => setShake(false), 500); }, 100);
+          }
+        }
+      };
+      const del = () => setDigits(d => d.slice(0, -1));
+
+      const KEYS = [["1","2","3"],["4","5","6"],["7","8","9"],["","0","⌫"]];
+
+      return (
+        <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center px-8"
+          style={{ fontFamily: "'IBM Plex Mono','Courier New',monospace" }}>
+          <style>{`@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap'); .bebas{font-family:'Bebas Neue',sans-serif;letter-spacing:.08em;} @keyframes shake{0%,100%{transform:translateX(0)}20%,60%{transform:translateX(-8px)}40%,80%{transform:translateX(8px)}}`}</style>
+          <div className="bebas text-5xl text-white mb-1 tracking-wide">UNREAL</div>
+          <div className="text-xs text-zinc-600 mb-10">17.–18.07.2026 · Dortmund</div>
+
+          {/* Dots */}
+          <div className={`flex gap-4 mb-10 ${shake ? "animate-[shake_0.4s_ease]" : ""}`}>
+            {[0,1,2,3].map(i => (
+              <div key={i} className={`w-4 h-4 rounded-full border-2 transition-all duration-150
+                ${i < digits.length
+                  ? error ? "bg-red-500 border-red-500" : "bg-amber-400 border-amber-400"
+                  : "bg-transparent border-zinc-600"}`} />
+            ))}
+          </div>
+
+          {/* Numpad */}
+          <div className="grid grid-cols-3 gap-3 w-64">
+            {KEYS.flat().map((k, i) => (
+              k === "" ? <div key={i} /> :
+              k === "⌫" ? (
+                <button key={i} onClick={del}
+                  className="h-16 rounded-2xl bg-zinc-800 border border-zinc-700 text-zinc-400 text-xl font-bold active:bg-zinc-700 transition-all select-none">
+                  {k}
+                </button>
+              ) : (
+                <button key={i} onClick={() => press(k)}
+                  className="h-16 rounded-2xl bg-zinc-900 border border-zinc-800 text-zinc-100 text-2xl font-bold active:bg-zinc-700 active:border-zinc-600 transition-all select-none">
+                  {k}
+                </button>
+              )
+            ))}
+          </div>
+          {error && <div className="mt-6 text-xs text-red-400 mono">Falscher Code</div>}
+        </div>
+      );
+    }
+
+    function Root() {
+      const [unlocked, setUnlocked] = useState(false);
+      if (!unlocked) return <PinScreen onUnlock={() => setUnlocked(true)} />;
+      return <App />;
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<Root />);
+  </script>
+</body>
+</html>
