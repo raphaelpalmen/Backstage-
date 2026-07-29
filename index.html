@@ -815,7 +815,7 @@ function ClubView({event,canEdit,editSection,onOpenItemEdit,onDeleteItem}){
 /* ════════════════════════════════════════
    LIVE MAP
 ════════════════════════════════════════ */
-function LiveMap({event,currentUser,compact=false}) {
+function LiveMap({event,currentUser,compact=false,viewOnly=false}) {
   const mapRef=useRef(null),mapInst=useRef(null),markers=useRef({}),myMark=useRef(null),wid=useRef(null);
   const [sharing,setSharing]=useState(false);
   const [locs,setLocs]=useState({});
@@ -875,29 +875,31 @@ function LiveMap({event,currentUser,compact=false}) {
   return (
     <div className="flex flex-col h-full">
       <div ref={mapRef} style={{flex:1,minHeight:compact?180:300}}/>
-      <div className="bg-zinc-900 border-t border-zinc-800 p-3 flex-shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="flex-1">
-            <div className="text-sm font-semibold text-zinc-100">Live Standort</div>
-            <div className="text-xs text-zinc-500">{active.length} aktiv{acc?` · ±${acc}m`:''}</div>
+      {!viewOnly&&(
+        <div className="bg-zinc-900 border-t border-zinc-800 p-3 flex-shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="flex-1">
+              <div className="text-sm font-semibold text-zinc-100">Live Standort</div>
+              <div className="text-xs text-zinc-500">{active.length} aktiv{acc?` · ±${acc}m`:''}</div>
+            </div>
+            {sharing
+              ?<button onClick={stopSharing} className="bg-red-500/20 border border-red-500/40 text-red-400 text-xs font-bold px-4 py-2 rounded-xl flex items-center gap-1.5 active:scale-95">
+                <span className="ldot" style={{background:'#ef4444'}}/> Stoppen
+               </button>
+              :<button onClick={startSharing} className="bg-emerald-500 text-black font-bold text-xs px-4 py-2 rounded-xl active:scale-95">📍 Teilen</button>
+            }
           </div>
-          {sharing
-            ?<button onClick={stopSharing} className="bg-red-500/20 border border-red-500/40 text-red-400 text-xs font-bold px-4 py-2 rounded-xl flex items-center gap-1.5 active:scale-95">
-              <span className="ldot" style={{background:'#ef4444'}}/> Stoppen
-             </button>
-            :<button onClick={startSharing} className="bg-emerald-500 text-black font-bold text-xs px-4 py-2 rounded-xl active:scale-95">📍 Teilen</button>
-          }
+          {active.length>0&&(
+            <div className="flex gap-2 mt-2 flex-wrap">
+              {active.map(([uid,l])=>(
+                <div key={uid} className="flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-zinc-800 border border-zinc-700">
+                  <span className="ldot"/><span className="text-zinc-300">{l.name?.split(' ')[0]}</span><span className="text-zinc-600">{l.time}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
-        {active.length>0&&(
-          <div className="flex gap-2 mt-2 flex-wrap">
-            {active.map(([uid,l])=>(
-              <div key={uid} className="flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-zinc-800 border border-zinc-700">
-                <span className="ldot"/><span className="text-zinc-300">{l.name?.split(' ')[0]}</span><span className="text-zinc-600">{l.time}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      )}
     </div>
   );
 }
@@ -1033,7 +1035,7 @@ function PickupMessageRow({pickup,eventId,currentUser,canSend}){
             <div className={`text-xs font-bold ${ps.text}`}>{ps.label}</div>
             <div className="text-[10px] text-zinc-600">{status.by} · {status.at?new Date(status.at).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'}):''}</div>
           </div>
-          {isAdmin&&phase!=='done'&&(
+          {(isAdmin||isFahrer)&&(
             <button onClick={reset} className="text-[10px] text-zinc-500 border border-zinc-700 px-2 py-1 rounded-lg active:bg-zinc-800">↺ Reset</button>
           )}
         </div>
@@ -1051,7 +1053,7 @@ function PickupMessageRow({pickup,eventId,currentUser,canSend}){
         </div>
       )}
       {/* Fahrer-Aktionen */}
-      {isFahrer&&phase!=='done'&&(
+      {isFahrer&&(
         <div className="flex gap-2">
           {!phase&&<button onClick={accept} className="flex-1 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-bold py-2.5 rounded-xl active:scale-95 transition-all">✓ Annehmen</button>}
           {phase==='accepted'&&<button onClick={markDone} className="flex-1 bg-zinc-800 border border-zinc-700 text-zinc-300 text-xs font-bold py-2.5 rounded-xl active:scale-95">🏁 Erledigt markieren</button>}
@@ -2127,15 +2129,22 @@ function GuestListView({entries,listType,eventId,canEdit}) {
 /* ════════════════════════════════════════
    ARTIST SELF VIEW
 ════════════════════════════════════════ */
-function ArtistPickupCard({pickup,eventId}){
-  const {status,msgs}=usePickupData(eventId,pickup.id);
+function ArtistPickupCard({pickup,eventId,currentUser}){
+  const {status,msgs,base}=usePickupData(eventId,pickup.id);
   const phase=status?.phase;
+  const [text,setText]=useState('');
+  const [drafting,setDrafting]=useState(false);
   const phaseStyle={
     accepted:{border:'border-emerald-500/30',label:'✅ Fahrer unterwegs',color:'text-emerald-400'},
     delayed:{border:'border-amber-500/30',label:'⏱ Verspätung',color:'text-amber-400'},
     done:{border:'border-zinc-700',label:'🏁 Abgeschlossen',color:'text-zinc-400'},
   };
   const ps=phase?phaseStyle[phase]:null;
+  const send=()=>{
+    if(!text.trim()) return;
+    fbPush(`${base}/msgs`,{text:text.trim(),sentBy:currentUser?.name||'Artist',sentByRole:'artist',sentAt:Date.now()});
+    setText('');setDrafting(false);
+  };
   return (
     <div className={`bg-zinc-900 border ${ps?.border||'border-zinc-800'} rounded-2xl p-5`}>
       <div className="text-xs text-zinc-500 mb-1">Pickup</div>
@@ -2145,13 +2154,29 @@ function ArtistPickupCard({pickup,eventId}){
       {ps&&<div className={`mt-2 text-xs font-bold ${ps.color}`}>{ps.label}</div>}
       {msgs.length>0&&(
         <div className="mt-3 space-y-1.5">
-          <div className="text-[10px] text-zinc-600 uppercase tracking-wider">Nachrichten vom Fahrer</div>
+          <div className="text-[10px] text-zinc-600 uppercase tracking-wider">Nachrichten</div>
           {msgs.map(m=>(
-            <div key={m.id} className="bg-blue-500/8 border border-blue-500/15 rounded-xl px-3 py-2">
-              <div className="text-sm text-blue-200 leading-relaxed">{m.text}</div>
-              <div className="text-[10px] text-zinc-600 mt-0.5">{m.sentBy} · {m.sentAt?new Date(m.sentAt).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'}):''}</div>
+            <div key={m.id} className={`rounded-xl px-3 py-2 ${m.sentByRole==='fahrer'?'bg-blue-500/8 border border-blue-500/15':'bg-amber-500/8 border border-amber-500/15'}`}>
+              <div className={`text-[10px] font-bold mb-0.5 ${m.sentByRole==='fahrer'?'text-blue-400':'text-amber-400'}`}>{m.sentBy}</div>
+              <div className="text-sm leading-relaxed text-zinc-200">{m.text}</div>
+              <div className="text-[10px] text-zinc-600 mt-0.5">{m.sentAt?new Date(m.sentAt).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'}):''}</div>
             </div>
           ))}
+        </div>
+      )}
+      {phase&&phase!=='done'&&currentUser&&(
+        <div className="mt-3">
+          {drafting?(
+            <div className="flex gap-2">
+              <input value={text} onChange={e=>setText(e.target.value)} onKeyDown={e=>e.key==='Enter'&&send()}
+                placeholder="Nachricht an Fahrer…"
+                className="flex-1 bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 outline-none focus:border-amber-500/50"/>
+              <button onClick={send} className="bg-amber-500 text-black text-xs font-bold px-3 py-2 rounded-xl active:scale-95">→</button>
+              <button onClick={()=>{setDrafting(false);setText('');}} className="text-zinc-500 text-xs px-2">✕</button>
+            </div>
+          ):(
+            <button onClick={()=>setDrafting(true)} className="text-xs text-amber-400/70 border border-amber-500/20 px-3 py-1.5 rounded-xl active:bg-amber-500/10">✏ Nachricht senden</button>
+          )}
         </div>
       )}
     </div>
@@ -2184,7 +2209,7 @@ function ArtistSelfView({event,artistName,currentUser,onBack}) {
           <span className={`inline-block text-xs px-2.5 py-1 rounded-lg border mt-2 ${getFC(artist.stage)}`}>{artist.stage}</span>
           {artist.tech&&<div className="text-xs text-zinc-500 mt-2">{artist.tech}</div>}
         </div>
-        {activePickup&&<ArtistPickupCard pickup={activePickup} eventId={event.id}/>}
+        {activePickup&&<ArtistPickupCard pickup={activePickup} eventId={event.id} currentUser={currentUser}/>}
         <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
           <div className="text-xs text-zinc-500 mb-1">Venue</div>
           <a href={mapsUrl(event.venueAddr)} target="_blank" className="text-sm text-zinc-200">{event.venueAddr} <span className="text-blue-400">↗</span></a>
@@ -2623,6 +2648,16 @@ function HomeAbendleitung({onOpenEvent,events,currentUser}) {
         })}
       </div>
 
+      {/* Fahrer Live-Standort */}
+      {active&&accepted.length>0&&(
+        <div className="px-4 mt-4">
+          <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-2">Fahrer Standort</div>
+          <div className="rounded-2xl overflow-hidden border border-zinc-800" style={{height:180}}>
+            <LiveMap event={active} currentUser={currentUser} compact viewOnly/>
+          </div>
+        </div>
+      )}
+
       {/* Pickup alerts */}
       {(pending.length>0||accepted.length>0)&&(
         <div className="px-4 mt-4 space-y-2">
@@ -2864,6 +2899,12 @@ function HomeArtist({currentUser,onOpenArtistView,events}) {
   const latestMsg=pickupMsgs[pickupMsgs.length-1];
   const phaseColor={accepted:'text-emerald-400',delayed:'text-amber-400',done:'text-zinc-500'};
   const phaseLabel={accepted:'✅ Fahrer unterwegs',delayed:'⏱ Verspätung',done:'🏁 Abgeschlossen'};
+  const [locs,setLocs]=useState({});
+  useEffect(()=>{
+    if(!event?.id) return;
+    return fbOn(`backstage/locations/${event.id}`,d=>setLocs(d||{}));
+  },[event?.id]);
+  const fahrerLoc=Object.values(locs).find(l=>l?.role==='fahrer'&&l?.lat);
 
   return (
     <div className="px-4 pb-6 fade-in">
@@ -2888,6 +2929,11 @@ function HomeArtist({currentUser,onOpenArtistView,events}) {
               <div className="text-[10px] text-blue-400/70">{latestMsg.sentBy}:</div>
               <div className="text-sm text-blue-300 font-medium">{latestMsg.text}</div>
             </div>}
+          </div>
+        )}
+        {fahrerLoc&&phase==='accepted'&&event&&(
+          <div className="rounded-2xl overflow-hidden border border-emerald-500/20" style={{height:180}}>
+            <LiveMap event={event} currentUser={currentUser} compact viewOnly/>
           </div>
         )}
         <button onClick={()=>onOpenArtistView(event,artistName)} className="w-full bg-amber-500/10 border border-amber-500/30 text-amber-400 font-semibold py-4 rounded-2xl text-sm active:scale-[.98]">Alle Details →</button>
