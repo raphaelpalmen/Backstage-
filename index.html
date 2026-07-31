@@ -1261,6 +1261,7 @@ const DM_ALLOWED_MAP={
 };
 
 function GroupChatThread({eventId,eventName,currentUser,onOpenDrawer,dmUnread}){
+  const t=useT();
   const [messages,setMessages]=useState([]);
   const [text,setText]=useState('');
   const bottomRef=useRef(null);
