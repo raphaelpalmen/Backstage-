@@ -1313,7 +1313,7 @@ function GroupChatThread({eventId,eventName,currentUser,onOpenDrawer,dmUnread}){
         {messages.map(m=>(
           <div key={m.id} className={`flex ${isMine(m)?'justify-end':'justify-start'}`}>
             <div className={`max-w-[78%] px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed ${isMine(m)?'bg-amber-500 text-black rounded-br-sm':'bg-zinc-800 text-zinc-100 rounded-bl-sm'}`}>
-              {!isMine(m)&&<div className={`text-[10px] font-bold mb-1 ${ROLE_COLOR[m.senderRole]?.split(' ')[0]||'text-zinc-500'}`}>{m.senderName}</div>}
+              <div className={`text-[10px] font-bold mb-1 ${isMine(m)?'text-black/50':ROLE_COLOR[m.senderRole]?.split(' ')[0]||'text-zinc-500'}`}>{isMine(m)?'Du':m.senderName}</div>
               {m.text}
               <div className={`text-[10px] mt-1 ${isMine(m)?'text-black/40':'text-zinc-600'}`}>
                 {new Date(m.timestamp).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})}
@@ -3065,8 +3065,9 @@ function HomeArtist({currentUser,onOpenArtistView,events}) {
             </div>}
           </div>
         )}
-        {fahrerLoc&&phase==='accepted'&&event&&(
+        {pickup&&phase&&phase!=='done'&&event&&(
           <div className="rounded-2xl overflow-hidden border border-emerald-500/20" style={{height:180}}>
+            <div className="text-[10px] text-emerald-500/70 px-2 pt-1 bg-zinc-950 absolute z-10">{fahrerLoc?'📍 Fahrer teilt Standort':'Warte auf Fahrer-Standort…'}</div>
             <LiveMap event={event} currentUser={currentUser} compact viewOnly/>
           </div>
         )}
