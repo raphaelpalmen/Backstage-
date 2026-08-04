@@ -1149,11 +1149,17 @@ function PickupMessageRow({pickup,eventId,currentUser,canSend}){
   };
 
   const phaseStyle={
-    accepted:{bg:'bg-emerald-500/10 border-emerald-500/20',text:'text-emerald-400',label:t('pickup_driver_enroute')},
+    accepted:{bg:'bg-blue-500/10 border-blue-500/20',text:'text-blue-400',label:'🚗 Unterwegs zum Artist'},
+    arrived:{bg:'bg-emerald-500/10 border-emerald-500/20',text:'text-emerald-400',label:'📍 Fahrer ist angekommen'},
     delayed:{bg:'bg-amber-500/10 border-amber-500/20',text:'text-amber-400',label:t('pickup_delay')},
     done:{bg:'bg-zinc-800 border-zinc-700',text:'text-zinc-400',label:t('pickup_finished')},
   };
   const ps=phaseStyle[phase]||null;
+
+  const markArrived=()=>{
+    fbSet(`${base}/status`,{...status,phase:'arrived',arrivedAt:Date.now()});
+    pushMsg('📍 Fahrer ist am Abholort angekommen','fahrer');
+  };
 
   return (
     <div className="mt-2 space-y-1.5">
@@ -1184,8 +1190,9 @@ function PickupMessageRow({pickup,eventId,currentUser,canSend}){
       {/* Fahrer-Aktionen */}
       {isFahrer&&(
         <div className="flex gap-2">
-          {!phase&&<button onClick={accept} className="flex-1 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-bold py-2.5 rounded-xl active:scale-95 transition-all">{t('pickup_accept')}</button>}
-          {phase==='accepted'&&<button onClick={markDone} className="flex-1 bg-zinc-800 border border-zinc-700 text-zinc-300 text-xs font-bold py-2.5 rounded-xl active:scale-95">{t('pickup_mark_done')}</button>}
+          {!phase&&<button onClick={accept} className="flex-1 bg-emerald-500 text-black text-xs font-black py-3 rounded-xl active:scale-95 transition-all shadow-lg shadow-emerald-500/20">{t('pickup_accept')}</button>}
+          {phase==='accepted'&&<button onClick={markArrived} className="flex-1 bg-blue-500/15 border border-blue-500/40 text-blue-300 text-xs font-bold py-2.5 rounded-xl active:scale-95">📍 Angekommen</button>}
+          {phase==='arrived'&&<button onClick={markDone} className="flex-1 bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-bold py-2.5 rounded-xl active:scale-95">{t('pickup_mark_done')}</button>}
         </div>
       )}
       {/* Nachricht senden */}
@@ -2717,7 +2724,7 @@ function HomeAbendleitung({onOpenEvent,events,currentUser}) {
   const [artistStatuses,setArtistStatuses]=useState({});
   useEffect(()=>{
     if(!active?.id) return;
-    const u1=fbOn(`backstage/pickupStatus/${active.id}`,d=>setPickupStatuses(d||{}));
+    const u1=fbOn(`backstage/pickups/${active.id}`,d=>setPickupStatuses(d||{}));
     const u2=fbOn(`backstage/artistStatus/${active.id}`,d=>setArtistStatuses(d||{}));
     return()=>{u1();u2();};
   },[active?.id]);
@@ -2735,8 +2742,11 @@ function HomeAbendleitung({onOpenEvent,events,currentUser}) {
     return{floor,current,next};
   });
 
-  const pending=pickups.filter(p=>!p.done&&pickupStatuses[p.id]?.status!=='accepted');
-  const accepted=pickups.filter(p=>!p.done&&pickupStatuses[p.id]?.status==='accepted');
+  const getPh=p=>pickupStatuses[p.id]?.status?.phase||null;
+  const pending=pickups.filter(p=>!getPh(p));
+  const accepted=pickups.filter(p=>getPh(p)==='accepted');
+  const arrived=pickups.filter(p=>getPh(p)==='arrived');
+  const donePU=pickups.filter(p=>getPh(p)==='done');
   const missingArtists=artists.filter(a=>!artistStatuses[artKey(a.name)]?.im_club);
   const allHere=missingArtists.length===0&&artists.length>0;
 
@@ -2780,8 +2790,8 @@ function HomeAbendleitung({onOpenEvent,events,currentUser}) {
         })}
       </div>
 
-      {/* Fahrer Live-Standort */}
-      {active&&accepted.length>0&&(
+      {/* Fahrer Live-Standort — zeigt wenn irgendwas aktiv */}
+      {active&&(accepted.length>0||arrived.length>0)&&(
         <div className="px-4 mt-4">
           <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-2">{t('driver_location')}</div>
           <div className="rounded-2xl overflow-hidden border border-zinc-800" style={{height:180}}>
@@ -2791,9 +2801,9 @@ function HomeAbendleitung({onOpenEvent,events,currentUser}) {
       )}
 
       {/* Pickup alerts */}
-      {(pending.length>0||accepted.length>0)&&(
+      {(pending.length>0||accepted.length>0||arrived.length>0)&&(
         <div className="px-4 mt-4 space-y-2">
-          <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">{t('pickups')}</div>
+          <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1">{t('pickups')}</div>
           {pending.map(p=>(
             <div key={p.id} className="bg-amber-500/5 border border-amber-500/25 rounded-2xl p-3.5 flex items-center gap-3">
               <div className="text-sm font-black text-amber-400 mono w-12 flex-shrink-0">{p.time}</div>
@@ -2801,17 +2811,27 @@ function HomeAbendleitung({onOpenEvent,events,currentUser}) {
                 <div className="text-sm font-semibold text-zinc-100">{p.artist}</div>
                 <div className="text-xs text-zinc-500 truncate">{p.from} → {p.to}</div>
               </div>
-              <span className="text-[10px] text-amber-400/70 font-semibold flex-shrink-0">{t('pickup_no_driver')}</span>
+              <span className="text-[10px] text-amber-400/70 font-semibold flex-shrink-0 bg-amber-500/10 px-2 py-1 rounded-lg">Wartet</span>
             </div>
           ))}
           {accepted.map(p=>(
+            <div key={p.id} className="bg-blue-500/5 border border-blue-500/20 rounded-2xl p-3.5 flex items-center gap-3">
+              <div className="text-sm font-black text-blue-400 mono w-12 flex-shrink-0">{p.time}</div>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-semibold text-zinc-100">{p.artist}</div>
+                <div className="text-xs text-zinc-400">{pickupStatuses[p.id]?.status?.by||'Fahrer'} unterwegs</div>
+              </div>
+              <span className="text-[10px] text-blue-400 font-semibold flex-shrink-0 bg-blue-500/10 px-2 py-1 rounded-lg">🚗 Unterwegs</span>
+            </div>
+          ))}
+          {arrived.map(p=>(
             <div key={p.id} className="bg-emerald-500/5 border border-emerald-500/25 rounded-2xl p-3.5 flex items-center gap-3">
               <div className="text-sm font-black text-emerald-400 mono w-12 flex-shrink-0">{p.time}</div>
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-semibold text-zinc-100">{p.artist}</div>
-                <div className="text-xs text-zinc-400">{pickupStatuses[p.id]?.acceptedBy} {t('pickup_enroute')}</div>
+                <div className="text-xs text-zinc-400">{pickupStatuses[p.id]?.status?.by||'Fahrer'} wartet am Abholort</div>
               </div>
-              <span className="text-emerald-400 text-base">✓</span>
+              <span className="text-[10px] text-emerald-400 font-semibold flex-shrink-0 bg-emerald-500/10 px-2 py-1 rounded-lg">📍 Da</span>
             </div>
           ))}
         </div>
@@ -2855,12 +2875,14 @@ function HomeFahrer({currentUser,onOpenEvent,events}) {
   const [statuses,setStatuses]=useState({});
   useEffect(()=>{
     if(!active?.id) return;
-    return fbOn(`backstage/pickupStatus/${active.id}`,data=>setStatuses(data||{}));
+    return fbOn(`backstage/pickups/${active.id}`,data=>setStatuses(data||{}));
   },[active?.id]);
 
-  const open=pickups.filter(p=>!p.done&&statuses[p.id]?.status!=='accepted');
-  const accepted=pickups.filter(p=>!p.done&&statuses[p.id]?.status==='accepted');
-  const done=pickups.filter(p=>p.done);
+  const getPhase=p=>statuses[p.id]?.status?.phase||null;
+  const open=pickups.filter(p=>!getPhase(p));
+  const accepted=pickups.filter(p=>getPhase(p)==='accepted');
+  const arrived=pickups.filter(p=>getPhase(p)==='arrived');
+  const done=pickups.filter(p=>getPhase(p)==='done');
 
   return (
     <div className="px-4 pb-6 fade-in">
@@ -2870,16 +2892,26 @@ function HomeFahrer({currentUser,onOpenEvent,events}) {
       </div>
       {active&&<div className="rounded-2xl overflow-hidden mb-4 border border-zinc-800" style={{height:190}}><LiveMap event={active} currentUser={currentUser} compact/></div>}
 
-      {/* Pending pickups — needs action */}
+      {/* PENDING — Urgent incoming request style */}
       {open.length>0&&(
         <>
-          <div className="text-xs font-semibold text-amber-400 uppercase tracking-widest mb-2">{t('pickup_pending')}</div>
+          <div className="text-xs font-semibold text-amber-400 uppercase tracking-widest mb-2 flex items-center gap-2">
+            <span className="ldot" style={{background:'#f59e0b',animation:'livepulse 1s ease infinite'}}/>
+            {t('pickup_pending')} · {open.length}
+          </div>
           {open.map((p,i)=>(
-            <div key={i} className="bg-zinc-900 border border-amber-500/20 rounded-2xl px-4 py-3.5 mb-2">
-              <div className="flex items-center gap-3">
-                <div className="w-12 text-center flex-shrink-0"><div className="text-base font-black text-amber-400 mono">{p.time}</div></div>
-                <div className="flex-1 min-w-0"><div className="text-sm font-semibold text-zinc-100">{p.artist}</div><div className="text-xs text-zinc-500 truncate">{p.from} → {p.to}</div></div>
-                {p.toAddr&&<a href={mapsUrl(p.toAddr)} target="_blank" className="bg-blue-500/10 border border-blue-500/30 text-blue-400 text-xs font-semibold px-3 py-1.5 rounded-xl flex-shrink-0">Nav ↗</a>}
+            <div key={i} className="bg-amber-500/5 border-2 border-amber-500/40 rounded-2xl px-4 py-4 mb-3" style={{boxShadow:'0 0 0 1px rgba(245,158,11,.15),0 4px 20px rgba(245,158,11,.08)'}}>
+              <div className="flex items-start gap-3 mb-3">
+                <div className="w-14 text-center flex-shrink-0 bg-amber-500/10 rounded-xl py-2">
+                  <div className="text-lg font-black text-amber-400 mono leading-tight">{p.time}</div>
+                  <div className="text-[9px] text-amber-500/60 uppercase">Uhrzeit</div>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-base font-bold text-zinc-100">{p.artist}</div>
+                  <div className="text-xs text-zinc-400 mt-0.5">{p.from}</div>
+                  <div className="text-xs text-zinc-600">→ {p.to}</div>
+                </div>
+                {p.fromAddr&&<a href={mapsUrl(p.fromAddr)} target="_blank" className="bg-blue-500/15 border border-blue-500/30 text-blue-400 text-xs font-bold px-3 py-2 rounded-xl flex-shrink-0 text-center leading-tight">Nav<br/>↗</a>}
               </div>
               <PickupMessageRow pickup={p} eventId={active.id} currentUser={currentUser} canSend={true}/>
             </div>
@@ -2887,16 +2919,19 @@ function HomeFahrer({currentUser,onOpenEvent,events}) {
         </>
       )}
 
-      {/* Accepted pickups */}
+      {/* ACCEPTED — en route */}
       {accepted.length>0&&(
         <>
-          <div className="text-xs font-semibold text-emerald-400 uppercase tracking-widest mb-2 mt-3">{t('pickup_accepted')}</div>
+          <div className="text-xs font-semibold text-blue-400 uppercase tracking-widest mb-2 mt-3 flex items-center gap-2">
+            <span className="ldot" style={{background:'#3b82f6'}}/>
+            Unterwegs
+          </div>
           {accepted.map((p,i)=>(
-            <div key={i} className="bg-zinc-900 border border-emerald-500/20 rounded-2xl px-4 py-3.5 mb-2">
-              <div className="flex items-center gap-3">
-                <div className="w-12 text-center flex-shrink-0"><div className="text-base font-black text-emerald-400 mono">{p.time}</div></div>
+            <div key={i} className="bg-blue-500/5 border border-blue-500/20 rounded-2xl px-4 py-3.5 mb-2">
+              <div className="flex items-center gap-3 mb-2">
+                <div className="w-12 text-center flex-shrink-0"><div className="text-base font-black text-blue-400 mono">{p.time}</div></div>
                 <div className="flex-1 min-w-0"><div className="text-sm font-semibold text-zinc-100">{p.artist}</div><div className="text-xs text-zinc-500 truncate">{p.from} → {p.to}</div></div>
-                {p.toAddr&&<a href={mapsUrl(p.toAddr)} target="_blank" className="bg-blue-500/10 border border-blue-500/30 text-blue-400 text-xs font-semibold px-3 py-1.5 rounded-xl flex-shrink-0">Nav ↗</a>}
+                {p.fromAddr&&<a href={mapsUrl(p.fromAddr)} target="_blank" className="bg-blue-500/10 border border-blue-500/30 text-blue-400 text-xs font-semibold px-3 py-1.5 rounded-xl flex-shrink-0">Nav ↗</a>}
               </div>
               <PickupMessageRow pickup={p} eventId={active.id} currentUser={currentUser} canSend={true}/>
             </div>
@@ -2904,7 +2939,28 @@ function HomeFahrer({currentUser,onOpenEvent,events}) {
         </>
       )}
 
-      {open.length===0&&accepted.length===0&&<div className="text-zinc-600 text-sm text-center py-8">{t('no_open_pickups')}</div>}
+      {/* ARRIVED — at pickup location */}
+      {arrived.length>0&&(
+        <>
+          <div className="text-xs font-semibold text-emerald-400 uppercase tracking-widest mb-2 mt-3 flex items-center gap-2">
+            <span className="ldot" style={{background:'#10b981',animation:'livepulse 1s ease infinite'}}/>
+            Angekommen
+          </div>
+          {arrived.map((p,i)=>(
+            <div key={i} className="bg-emerald-500/5 border border-emerald-500/25 rounded-2xl px-4 py-3.5 mb-2">
+              <div className="flex items-center gap-3 mb-2">
+                <div className="w-12 text-center flex-shrink-0"><div className="text-base font-black text-emerald-400 mono">{p.time}</div></div>
+                <div className="flex-1 min-w-0"><div className="text-sm font-semibold text-zinc-100">{p.artist}</div><div className="text-xs text-zinc-400">{p.from} — warte auf Artist</div></div>
+                {p.toAddr&&<a href={mapsUrl(p.toAddr)} target="_blank" className="bg-blue-500/10 border border-blue-500/30 text-blue-400 text-xs font-semibold px-3 py-1.5 rounded-xl flex-shrink-0">Ziel ↗</a>}
+              </div>
+              <PickupMessageRow pickup={p} eventId={active.id} currentUser={currentUser} canSend={true}/>
+            </div>
+          ))}
+        </>
+      )}
+
+      {open.length===0&&accepted.length===0&&arrived.length===0&&done.length===0&&<div className="text-zinc-600 text-sm text-center py-8">{t('no_open_pickups')}</div>}
+      {open.length===0&&accepted.length===0&&arrived.length===0&&done.length>0&&<div className="text-emerald-600 text-sm text-center py-6 flex items-center justify-center gap-2"><span>✓</span> Alle Fahrten erledigt</div>}
 
       {/* Full pickup schedule */}
       {pickups.length>1&&(
@@ -3031,8 +3087,8 @@ function HomeArtist({currentUser,onOpenArtistView,events}) {
   const phase=pickupStatus?.phase;
   const latestMsg=pickupMsgs[pickupMsgs.length-1];
   const t=useT();
-  const phaseColor={accepted:'text-emerald-400',delayed:'text-amber-400',done:'text-zinc-500'};
-  const phaseLabel={accepted:t('pickup_driver_enroute'),delayed:t('pickup_delay'),done:t('pickup_finished')};
+  const phaseColor={accepted:'text-blue-400',arrived:'text-emerald-400',delayed:'text-amber-400',done:'text-zinc-500'};
+  const phaseLabel={accepted:'🚗 Fahrer unterwegs',arrived:'📍 Fahrer ist da!',delayed:t('pickup_delay'),done:t('pickup_finished')};
   const [locs,setLocs]=useState({});
   useEffect(()=>{
     if(!event?.id) return;
