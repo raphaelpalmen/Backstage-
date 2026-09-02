@@ -1,0 +1,2801 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="backstage.app">
+<meta name="theme-color" content="#09090b">
+<title>backstage.app</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+/* Leaflet über mehrere Quellen laden. __leafletLog hält fest, was geklappt hat. */
+window.__leafletLog = [];
+window.__leafletReady = (function(){
+  if (typeof L !== 'undefined'){ window.__leafletLog.push('cdnjs ✓'); return Promise.resolve(true); }
+  window.__leafletLog.push('cdnjs ✗');
+  var SRC = [
+    ['jsDelivr','https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css','https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js'],
+    ['unpkg',   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',           'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js']
+  ];
+  return new Promise(function(res){
+    var done=false, finish=function(v){ if(!done){done=true;res(v);} };
+    var i=0;
+    var next=function(){
+      if(i>=SRC.length) return finish(false);
+      var e=SRC[i++], name=e[0];
+      var css=document.createElement('link'); css.rel='stylesheet'; css.href=e[1]; document.head.appendChild(css);
+      var s=document.createElement('script'); s.src=e[2];
+      s.onload=function(){ if(typeof L!=='undefined'){window.__leafletLog.push(name+' ✓');finish(true);} else {window.__leafletLog.push(name+' ✗ (leer)');next();} };
+      s.onerror=function(){ window.__leafletLog.push(name+' ✗'); next(); };
+      document.head.appendChild(s);
+    };
+    next();
+    setTimeout(function(){ if(typeof L!=='undefined'){finish(true);} else {window.__leafletLog.push('Zeitüberschreitung');finish(false);} },12000);
+  });
+})();
+</script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<script>
+const FB_CONF = {
+  apiKey:"AIzaSyBzGOIZrQCG9I1iaiov5Hxupy6SgRu9Fcw",
+  authDomain:"unreal-546b4.firebaseapp.com",
+  databaseURL:"https://unreal-546b4-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId:"unreal-546b4",storageBucket:"unreal-546b4.firebasestorage.app",
+  messagingSenderId:"674503516490",appId:"1:674503516490:web:2df6cffa6bdf7a2c5861b3"
+};
+firebase.initializeApp(FB_CONF);
+const db = firebase.database();
+const fbAuth = firebase.auth();
+/* Zweite Firebase-Instanz: legt Konten an, ohne die eigene Sitzung zu beenden */
+let _worker = null;
+const workerAuth = () => {
+  if(!_worker) _worker = firebase.initializeApp(FB_CONF,'account-worker');
+  return _worker.auth();
+};
+const ROOT = 'backstage/ops';
+window.__fbErr = null;
+
+/* ── Als App installierbar machen (Manifest + Icons zur Laufzeit) ──── */
+(function(){
+  var ICON='data:image/svg+xml,'+encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">'+
+    '<rect width="512" height="512" rx="112" fill="#09090b"/>'+
+    '<rect x="150" y="120" width="26" height="272" rx="13" fill="#f59e0b"/>'+
+    '<rect x="206" y="180" width="26" height="212" rx="13" fill="#fafafa"/>'+
+    '<rect x="262" y="150" width="26" height="242" rx="13" fill="#fafafa"/>'+
+    '<rect x="318" y="215" width="26" height="177" rx="13" fill="#f59e0b"/>'+
+    '</svg>');
+  try{
+    var man={name:'backstage.app',short_name:'backstage',description:'Crew Operations',
+      start_url:location.pathname,scope:location.pathname,display:'standalone',orientation:'portrait',
+      background_color:'#09090b',theme_color:'#09090b',
+      icons:[{src:ICON,sizes:'any',type:'image/svg+xml',purpose:'any maskable'}]};
+    var l=document.createElement('link');l.rel='manifest';
+    l.href=URL.createObjectURL(new Blob([JSON.stringify(man)],{type:'application/json'}));
+    document.head.appendChild(l);
+  }catch(e){}
+  /* iOS braucht ein PNG — aus dem SVG auf einen Canvas zeichnen */
+  try{
+    var img=new Image();
+    img.onload=function(){
+      var c=document.createElement('canvas');c.width=c.height=180;
+      var x=c.getContext('2d');x.drawImage(img,0,0,180,180);
+      var a=document.createElement('link');a.rel='apple-touch-icon';a.href=c.toDataURL('image/png');
+      document.head.appendChild(a);
+    };
+    img.src=ICON;
+  }catch(e){}
+  /* Android/Chrome: Installationsangebot abfangen und aufheben */
+  window.__installPrompt=null;
+  window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();window.__installPrompt=e;});
+})();
+
+/* ── MODUS: 'fb' = Firebase-Sync · 'local' = Testmodus im Browser ───── */
+let MODE = 'fb';
+const getMode = () => MODE;
+
+/* ── Lokaler Ersatz-Store (gleiche API wie Firebase) ───────────────── */
+/* ACHTUNG: dieser Speicher darf NICHT "L" heißen — das ist Leaflet. */
+const LS='unrealops-local-v1';
+const STORE={d:{},subs:new Map(),n:0};
+try{ STORE.d=JSON.parse(localStorage.getItem(LS)||'{}'); }catch(e){ STORE.d={}; }
+const _p    = p=>String(p).split('/').filter(Boolean);
+const _clone= v=>v==null?null:JSON.parse(JSON.stringify(v));
+const _save = ()=>{ try{ localStorage.setItem(LS,JSON.stringify(STORE.d)); }catch(e){ console.warn('localStorage voll',e); } };
+const _get  = p=>{ let c=STORE.d; for(const k of _p(p)){ if(c==null||typeof c!=='object') return null; c=c[k]; } return c===undefined?null:c; };
+const _dig  = ks=>{ let c=STORE.d; for(const k of ks){ if(typeof c[k]!=='object'||c[k]===null) c[k]={}; c=c[k]; } return c; };
+const _notify=()=>STORE.subs.forEach(s=>s.cb(_clone(_get(s.p))));
+const _set  = (p,v)=>{ const ks=_p(p),last=ks.pop(),c=_dig(ks);
+  if(v===null||v===undefined) delete c[last]; else c[last]=_clone(v);
+  _save(); _notify(); };
+const _upd  = (p,o)=>{ const c=_dig(_p(p));
+  Object.entries(o).forEach(([k,v])=>{ if(v===null||v===undefined) delete c[k]; else c[k]=_clone(v); });
+  _save(); _notify(); };
+const _key  = ()=>'-L'+Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+
+/* ── Einheitliche Helfer ───────────────────────────────────────────── */
+const rep = (what,p) => e => { console.error('[FB]',what,p,e);
+  if(window.__fbErr) window.__fbErr(`Schreiben fehlgeschlagen (${what}): ${e.message||e}`); throw e; };
+const fbSet = (p,v)=> MODE==='local' ? (_set(p,v),Promise.resolve()) : db.ref(p).set(v).catch(rep('set',p));
+const fbUpd = (p,v)=> MODE==='local' ? (_upd(p,v),Promise.resolve()) : db.ref(p).update(v).catch(rep('update',p));
+const fbPush= (p,v)=> { if(MODE==='local'){ const k=_key(); _set(p+'/'+k,v); return Promise.resolve(k); }
+  const r=db.ref(p).push(); return r.set(v).catch(rep('push',p)).then(()=>r.key); };
+const fbDel = (p)  => MODE==='local' ? (_set(p,null),Promise.resolve()) : db.ref(p).remove().catch(rep('delete',p));
+const fbOn  = (p,cb,onErr)=>{
+  if(MODE==='local'){ const id=++STORE.n; STORE.subs.set(id,{p,cb}); cb(_clone(_get(p))); return ()=>STORE.subs.delete(id); }
+  const r=db.ref(p);
+  const h=r.on('value',s=>cb(s.val()),e=>{ console.error('[FB read]',p,e);
+    if(onErr) onErr(e); else if(window.__fbErr) window.__fbErr(`Lesen fehlgeschlagen: ${e.message||e}`); });
+  return ()=>r.off('value',h);
+};
+const fbOnce= (p)=> MODE==='local' ? Promise.resolve(_clone(_get(p))) : db.ref(p).once('value').then(s=>s.val());
+
+/* ── Konten (geteilt mit der alten App) ────────────────────────────── */
+const USERS = 'backstage/appUsers';
+/* Rollen der alten App auf die drei Rollen hier abbilden */
+const ROLE_MAP = {
+  superadmin:'superadmin',
+  admin:'leitung', abendleitung:'leitung', techniker:'leitung', leitung:'leitung',
+  kasse:'einlass', einlass:'einlass',
+  fahrer:'fahrer',
+};
+const AUTH_ERRORS = {
+  'auth/invalid-email':'Keine gültige E-Mail-Adresse.',
+  'auth/user-not-found':'Kein Konto mit dieser E-Mail.',
+  'auth/wrong-password':'Falsches Passwort.',
+  'auth/invalid-credential':'E-Mail oder Passwort stimmt nicht.',
+  'auth/email-already-in-use':'Für diese E-Mail gibt es schon ein Konto.',
+  'auth/weak-password':'Passwort zu kurz (mind. 6 Zeichen).',
+  'auth/too-many-requests':'Zu viele Versuche. Kurz warten.',
+  'auth/network-request-failed':'Keine Verbindung zum Server.',
+  'auth/operation-not-allowed':'E-Mail-Anmeldung ist im Firebase-Projekt nicht aktiviert.',
+};
+/* Einladungscode bestimmt nur die Rolle — die Sicherheit liegt im Passwort */
+const INVITE_ROLES = { LEITUNG:'leitung', DOOR:'einlass', EINLASS:'einlass', FAHRER:'fahrer' };
+</script>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Bebas+Neue&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;margin:0;padding:0}
+html,body{height:100%}
+body{background:#09090b;overscroll-behavior:none;font-family:'IBM Plex Mono',ui-monospace,monospace;color:#e4e4e7}
+.bebas{font-family:'Bebas Neue',sans-serif;letter-spacing:.055em}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace}
+::-webkit-scrollbar{width:3px;height:3px}::-webkit-scrollbar-thumb{background:#3f3f46;border-radius:3px}
+.safe-top{padding-top:env(safe-area-inset-top,0px)}
+.safe-bot{padding-bottom:max(env(safe-area-inset-bottom,0px),20px)}
+input,textarea,select{font-family:'IBM Plex Mono',ui-monospace,monospace;background:transparent}
+input:focus,textarea:focus,select:focus{outline:none}
+.slide{animation:sl .22s cubic-bezier(.32,.72,0,1)}
+@keyframes sl{from{transform:translateY(14px);opacity:0}to{transform:translateY(0);opacity:1}}
+.fade{animation:fd .16s ease}
+@keyframes fd{from{opacity:0}to{opacity:1}}
+.leaflet-container{background:#18181b;font-family:'IBM Plex Mono',monospace}
+.leaflet-tile{filter:invert(1) hue-rotate(180deg) brightness(.82) contrast(.92) saturate(.5)}
+.leaflet-control-attribution{background:rgba(9,9,11,.7)!important;color:#52525b!important;font-size:8px!important}
+.leaflet-control-attribution a{color:#71717a!important}
+.leaflet-bar a{background:#27272a!important;color:#e4e4e7!important;border-color:#3f3f46!important}
+.drv-pin{background:#3b82f6;width:16px;height:16px;border-radius:50%;border:3px solid #09090b;box-shadow:0 0 0 3px rgba(59,130,246,.35),0 0 14px rgba(59,130,246,.7)}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const {useState,useEffect,useCallback,useRef,useMemo}=React;
+
+/* ══ CONFIG ══════════════════════════════════════════════════════════ */
+const ROLES={
+  superadmin:{code:'UNREAL',  label:'SUPERADMIN', color:'#f59e0b'},
+  leitung:   {code:'LEITUNG', label:'LEITUNG',    color:'#f59e0b'},
+  einlass:   {code:'DOOR',    label:'EINLASS',    color:'#10b981'},
+  fahrer:    {code:'FAHRER',  label:'FAHRER',     color:'#3b82f6'},
+};
+const STATUS_ALL=[
+  {k:'pickup_ok',    l:'Pickup ✓'},
+  {k:'im_club',      l:'Im Club'},
+  {k:'rider_ok',     l:'Rider ✓'},
+  {k:'soundcheck_ok',l:'Soundcheck ✓'},
+  {k:'set_start',    l:'Set läuft'},
+  {k:'set_end',      l:'Set beendet'},
+  {k:'ausgecheckt',  l:'Ausgecheckt'},
+];
+const PALETTE=[
+  {n:'orange',hex:'#fb923c',t:'text-orange-400',b:'border-orange-500/40',bg:'bg-orange-500/10'},
+  {n:'red',   hex:'#f87171',t:'text-red-400',   b:'border-red-500/40',   bg:'bg-red-500/10'},
+  {n:'violet',hex:'#a78bfa',t:'text-violet-400',b:'border-violet-500/40',bg:'bg-violet-500/10'},
+  {n:'cyan',  hex:'#22d3ee',t:'text-cyan-400',  b:'border-cyan-500/40',  bg:'bg-cyan-500/10'},
+  {n:'emerald',hex:'#34d399',t:'text-emerald-400',b:'border-emerald-500/40',bg:'bg-emerald-500/10'},
+  {n:'pink',  hex:'#f472b6',t:'text-pink-400',  b:'border-pink-500/40',  bg:'bg-pink-500/10'},
+];
+const facc=(floors,f)=>PALETTE[Math.max(0,(floors||[]).indexOf(f))%PALETTE.length];
+
+/* ══ SEED: DORTMUND ══════════════════════════════════════════════════ */
+const A=(id,name,day,floor,s,e,x={})=>({id,name,day,floor,setStart:s,setEnd:e,...x});
+const SEED_ARTISTS=[
+  A('a101','Amilli','Fr 17.07','Floor I Outdoor','16:00','17:00'),
+  A('a102','Haná','Fr 17.07','Floor I Outdoor','17:00','18:30',{contactName:'Hannah Charlotte Opgaard',contactPhone:'+44 7710 268053'}),
+  A('a103','Adrian Mills','Fr 17.07','Floor I Outdoor','18:30','20:30',{contactName:'Adrian Ortíz',contactPhone:'+49 176 32123985'}),
+  A('a104','Cloudy','Fr 17.07','Floor I Outdoor','20:30','22:00',{contactName:'Claudia Koziolek',contactPhone:'+49 176 47650659'}),
+  A('a105','Johannes Schuster','Fr 17.07','Floor II Indoor','22:00','00:00',{contactName:'Johannes Schuster',contactPhone:'+49 174 3391958',notes:'Gemeinsam mit Prossowski'}),
+  A('a106','Kander','Fr 17.07','Floor II Indoor','00:00','02:00',{contactName:'Alex Harrison',contactPhone:'+44 7711 921808'}),
+  A('a107','A.N.I.','Fr 17.07','Floor II Indoor','02:00','04:00',{contactName:'TM Ersin Akgül',contactPhone:'+49 176 70584700'}),
+  A('a108','Emma Lena','Fr 17.07','Floor II Indoor','04:00','06:00',{contactName:'Emma',contactPhone:'+49 177 4847445'}),
+  A('a109','Prossowski','Fr 17.07','Floor III Indoor','22:00','00:00',{contactName:'Lukas Prossowski',contactPhone:'+49 152 26562794',notes:'Gemeinsam mit Johannes Schuster'}),
+  A('a110','Flacco','Fr 17.07','Floor III Indoor','00:00','02:00'),
+  A('a111','Celodic','Fr 17.07','Floor III Indoor','02:00','04:00'),
+  A('a201','Esch','Sa 18.07','Floor I Outdoor','14:00','16:30'),
+  A('a202','Aerea','Sa 18.07','Floor I Outdoor','16:30','18:00',{soundcheck:'13:00',contactName:'Carlota Hernandez',contactPhone:'+34 643 17 87 20',notes:'Soundcheck 13:00 · drei Pickups · Ruben (Videograf) separat'}),
+  A('a203','Nikolina','Sa 18.07','Floor I Outdoor','18:00','20:00',{contactName:'Ronja Hauck',contactPhone:'+49 176 24885054'}),
+  A('a204','Kloud','Sa 18.07','Floor I Outdoor','20:00','22:00',{contactName:'Kloud',contactPhone:'+1 818 970 0710',notes:'⚠️ Anonym / Maske — separater Raum oberhalb Backstage'}),
+  A('a205','Suska','Sa 18.07','Floor II Indoor','22:00','00:00',{contactName:'Philipp Suska',contactPhone:'+49 176 62993739',notes:'Gemeinsam mit Vagabund + 909'}),
+  A('a206','Afem Syko','Sa 18.07','Floor II Indoor','00:00','02:00',{contactName:'Matthias Waschitzek',contactPhone:'+49 176 30109782'}),
+  A('a207','Byorn','Sa 18.07','Floor II Indoor','02:00','04:00',{contactName:'Bjorn Verbeeck',contactPhone:'+32 471 23 04 78'}),
+  A('a208','Neon Graveyard','Sa 18.07','Floor II Indoor','04:00','06:00',{contactName:'Martin Gruetter',contactPhone:'+49 157 71436716'}),
+  A('a209','Vagabund','Sa 18.07','Floor III Indoor','22:00','01:00',{contactName:'Malik Tahiri',contactPhone:'+49 151 25181340'}),
+  A('a210','909 Racing Team','Sa 18.07','Floor III Indoor','01:00','04:00',{contactName:'Mike Momburg',contactPhone:'+49 163 1948988'}),
+];
+const P=(id,time,label,day,x={})=>({id,time,label,day,from:'Hotel',to:'Venue',...x});
+const SEED_PICKUPS=[
+  P('p1','15:50','Haná',                    'Fr 17.07'),
+  P('p2','18:00','Adrian Mills',            'Fr 17.07'),
+  P('p3','19:30','Cloudy',                  'Fr 17.07'),
+  P('p4','21:15','Schuster + Prossowski',   'Fr 17.07'),
+  P('p5','23:15','Kander',                  'Fr 17.07'),
+  P('p6','01:15','A.N.I.',                  'Fr 17.07'),
+  P('p7','03:15','Emma Lena',               'Fr 17.07'),
+  P('p8','12:45','Aerea · Soundcheck',      'Sa 18.07',{to:'Venue (SC)'}),
+  P('p9','15:15','Ruben (Videograf)',       'Sa 18.07'),
+  P('p10','16:00','Aerea',                  'Sa 18.07'),
+  P('p11','18:45','Kloud',                  'Sa 18.07'),
+  P('p12','21:15','Suska + Vagabund + 909', 'Sa 18.07'),
+  P('p13','01:15','Byorn',                  'Sa 18.07'),
+  P('p14','03:15','Neon Graveyard',         'Sa 18.07'),
+];
+/* Rider & Techrider je Artist */
+const SEED_RT={
+ a101:['2x Sekt\n4x Wasser','A&H92 · 4x CDJ 3000'],
+ a102:['4x Wasser still\n2x Powerade\n3x Red Bull\n1x Vodka Absolut\n2x Capri Sonne\nVogue Zigaretten\n1x Handtuch','DJM A9 · 4x CDJ 3000 · ⚠️ zwei Mixer nebeneinander, A9 abbauen nach Set'],
+ a103:['2x Wasser still (0,33L)\n1x schwarzes Handtuch\n10x Fanta Exotic\n4x Powerade\n10x Red Bull (Blue / Green / White)\nOCB Long Papes\n1x Pall Mall Blau\nWeed 1–2g\nMango / Früchte\n1x Orbit Lemon Kaugummi','A&H92 · 4x CDJ 3000'],
+ a104:['10x Wasser still\n1x Handtuch\n1x Vodka Belvedere\n4x Wasser sprudel (0,33L)\n4x Club Mate / Red Bull\n1x Capri Sun\n2x Marlboro Gold\n1x Banane\nSnack Bars (Nüsse)','A&H96 · 4x CDJ 3000'],
+ a105:['2x Wasser sprudel\n1x Handtuch\n2x Champagner\n1x Premium Vodka (Grey Goose / Belvedere)\n4x Bier (lokal, Pilsner / Helles / Lager)\n4x Red Bull Zero\n4x ChariTea Mate\n4x Volvic Essence Zitrusfrucht Rosmarin\n4x Coca Cola Zero\n4x Limettenscheiben\n4x Coconut Water\n2x Protein Bars','A&H96 · 4x CDJ 3000'],
+ a106:['1x Vodka Belvedere\nCamel Blue\n2x Coconut Water\nWasser sprudel\nZitronen\nClub Mate oder Red Bull\n1x Ginger Shot\nSweets / Haribo\nAlkoholfreies Bier\n4x Wasser\n1x Handtuch','A&H96 · 4x CDJ 3000'],
+ a107:['1x Handtuch\nCola Zero\nWasser sprudel\n1x Vodka Belvedere\nBier','A&H96 · 4x CDJ 3000'],
+ a108:['2x Wasser\n2x Mate\n2x Red Bull','A&H96 · 4x CDJ 3000'],
+ a109:['1x Zitronensaft\n1x Absolut Vodka\nWasser sprudel','A&H96 · 3x CDJ 3000'],
+ a110:['4x Fiji Water still\n6x Corona\n1x Absolut Vodka\n6x Wasser sprudel\n1x Lime Juice\nR1 Blue Zigaretten\n1x Handtuch\nVentilator','A&H96 · 3x CDJ 3000'],
+ a111:['6x Wasser still','A&H96 · 3x CDJ 3000'],
+ a201:['2x Sekt\n4x Mate\n2x Wasser','A&H 96 · 4x CDJ 3000'],
+ a202:['Stilles Mineralwasser\nSoft Drinks\nBier\n1x Roku Suntory Japanese Gin\n1x Suntory Toki Whisky\n2x Handtücher\n2x Ventilatoren auf der Bühne','A&H 96 Stand alone · 1x Shure SM58 Mic + XLR · 2x Fans · 1x EU Power Strip'],
+ a203:['2x Prosecco\nRed Bull oder Club Mate\n3x Wasser still\nFrüchte (Erdbeeren, Trauben, Blaubeeren)\n1x Marlboro Gold\n1x Kaugummi','A&H 96 · 4x CDJ 3000'],
+ a204:['2x Red Bull / Energy Drink\n4x Handtücher (weiß/schwarz)\n6x Wasser / Wasser sprudel\n1x Organic Coconut Water\n6x lokales Bier (kein IPA)\n1x Don Julio 1942\n1x Moët & Chandon Champagner','DJM V10 · 4x CDJ 3000'],
+ a205:['4x Wasser\n4x Bier\n4x Red Bull Vodka\n4x Club Mate Vodka\n2x Sparkling Wine Mate','A&H 96 · 4x CDJ 3000'],
+ a206:['2x Coconut Water\n4x Wasser still','A&H 96 · 4x CDJ 3000'],
+ a207:['6x Wasser still (Glas)\n6x Wasser sprudel (Glas)\nSoft Drinks\n6x Ginger Beer / Ginger Ale / Club Mate\n1x Vodka Belvedere','DJM A9 · 4x CDJ 3000'],
+ a208:['3x Wasser still\n1x Vitamin Well Reload\n1x Ginger Shot\n1x Kaugummi','A&H 96 · 4x CDJ 3000'],
+ a209:['1x Sekt\n2x lokales Bier\n2x Club Mate\n2x Red Bull\n2x Wasser still (0,33L)\n1x Marlboro Gold','A&H 96 · 4x CDJ 3000'],
+ a210:['Drink Tickets\nWasser\nSäfte\nBier\n1x Premium Vodka\n1x Prosecco\n4x Mate Lemonade\n4x Red Bull\nMarlboro Gold','A&H 96 · 4x CDJ 3000'],
+};
+/* dir: 'in'=Anreise  'out'=Abreise */
+const T=(id,dir,day,artist,contact,phone,mode,from,to,time,x={})=>
+  ({id,dir,day,artist,contact,phone,mode,from,to,time,driver:'',notes:'',done:false,...x});
+const RT='Royal Transfer · Mitat Dağ · +49 151 44365466';
+const SEED_TRAVEL=[
+  /* ── ANREISE ── */
+  T('i1','in','17.07','Haná',             'Hannah Charlotte Opgaard','+44 7710 268053','Eigene Anreise (Auto)','—','Hotel','—'),
+  T('i2','in','17.07','Adrian Mills',     'Adrian Ortíz',            '+49 176 32123985','Zu Fuß','Dortmund HBF','Hotel','—'),
+  T('i3','in','17.07','Cloudy',           'Claudia Koziolek',        '+49 176 47650659','Zu Fuß','Dortmund HBF','Hotel','—'),
+  T('i4','in','17.07','Johannes Schuster','Johannes Schuster',       '+49 174 3391958','Zu Fuß','Dortmund HBF','Hotel','—'),
+  T('i5','in','17.07','Kander',           'Alex Harrison',           '+44 7711 921808','Zu Fuß','Dortmund HBF','Hotel','18:12',{notes:'Ankunft Zug 18:12'}),
+  T('i6','in','17.07','A.N.I.',           'Ersin Akgül',             '+49 176 70584700','Eigene Anreise (Auto)','—','Hotel','—'),
+  T('i7','in','18.07','Aerea + Ruben',    'Carlota / Ruben',         '+34 643 17 87 20','Royal Transfer','Dortmund Flughafen','Hotel','11:50',{driver:RT,notes:'Flug W61093 · Soundcheck 13:00'}),
+  T('i8','in','18.07','Nikolina',         'Ronja Hauck',             '+49 176 24885054','Royal Transfer','Sheraton Düsseldorf','Hotel','—',{driver:RT}),
+  T('i9','in','18.07','Kloud',            'Kloud',                   '+1 818 970 0710','offen','—','Hotel','—',{notes:'⚠️ Anonym / Maske'}),
+  T('i10','in','18.07','Suska',           'Philipp Suska',           '+49 176 62993739','Zu Fuß','Dortmund HBF','Hotel','—'),
+  T('i11','in','18.07','Afem Syko',       'Matthias Waschitzek',     '+49 176 30109782','Royal Transfer','Sheraton Düsseldorf','Hotel','22:30',{driver:RT}),
+  T('i12','in','18.07','Byorn',           'Bjorn Verbeeck',          '+32 471 23 04 78','Eigene Anreise (Auto)','—','Hotel','—'),
+  T('i13','in','18.07','Neon Graveyard',  'Martin Gruetter',         '+49 157 71436716','Zu Fuß','Dortmund HBF','Hotel','19:21',{notes:'Ankunft Zug 19:21'}),
+  /* ── ABREISE ── */
+  T('o1','out','18.07','Haná',             'Hannah Charlotte Opgaard','+44 7710 268053','Eigene Abreise (Auto)','Hotel','—','—'),
+  T('o2','out','18.07','Adrian Mills',     'Adrian Ortíz',            '+49 176 32123985','Zu Fuß','Hotel','Dortmund HBF','—'),
+  T('o3','out','18.07','Cloudy',           'Claudia Koziolek',        '+49 176 47650659','Zu Fuß','Hotel','Dortmund HBF','—'),
+  T('o4','out','18.07','Johannes Schuster','Johannes Schuster',       '+49 174 3391958','Zu Fuß','Hotel','Dortmund HBF','—'),
+  T('o5','out','18.07','Kander',           'Alex Harrison',           '+44 7711 921808','Zu Fuß','Hotel','Dortmund HBF','13:36',{notes:'Zug 13:36'}),
+  T('o6','out','18.07','A.N.I.',           'Ersin Akgül',             '+49 176 70584700','Eigene Abreise (Auto)','Hotel','—','—'),
+  T('o7','out','18.07','Nikolina',         'Ronja Hauck',             '+49 176 24885054','Royal Transfer','Junkyard','Sheraton Düsseldorf','20:05',{driver:RT}),
+  T('o8','out','18.07','Aerea + Ruben',    'Carlota / Ruben',         '+34 643 17 87 20','Royal Transfer','Hotel','Düsseldorf Flughafen','16:30',{driver:RT}),
+  T('o9','out','19.07','Kloud',            'Kloud',                   '+1 818 970 0710','Zu Fuß','Hotel','Dortmund HBF','—'),
+  T('o10','out','19.07','Suska',           'Philipp Suska',           '+49 176 62993739','Zu Fuß','Hotel','Dortmund HBF','—'),
+  T('o11','out','19.07','Afem Syko',       'Matthias Waschitzek',     '+49 176 30109782','Zu Fuß','Hotel','Dortmund HBF','—'),
+  T('o12','out','19.07','Byorn',           'Bjorn Verbeeck',          '+32 471 23 04 78','Eigene Abreise (Auto)','NH Hotel','eigenständig','—'),
+  T('o13','out','19.07','Neon Graveyard',  'Martin Gruetter',         '+49 157 71436716','Zu Fuß','Hotel','Dortmund HBF','09:36',{notes:'Zug 09:36'}),
+];
+const SEED_NOTES=[
+  '🚐 Royal Transfer — Mitat Dağ · +49 151 44365466',
+  '🌀 Mainfloor Outdoor: mind. 2 Ventilatoren zwingend an BEIDEN Tagen',
+  '⚠️ Kloud bleibt anonym / trägt Maske — separaten Raum oberhalb Backstage',
+  '🎫 Backstage: Artist + Crew + 1 Gast max. Gäste konsequent rausschicken',
+  '📵 Handyverbot — Einlasspersonal beim Stickern explizit hinweisen',
+  '🎥 Kein Multicam auf Mainfloor Outdoor. Indoor erlaubt.',
+];
+function seedTravel(){const t={};SEED_TRAVEL.forEach(x=>{const{id,...r}=x;t[id]=r;});return t;}
+function buildSeed(){
+  const artists={},pickups={},notes={};
+  SEED_ARTISTS.forEach(a=>{const{id,...r}=a;
+    artists[id]={...r,rider:(SEED_RT[id]||['',''])[0],tech:(SEED_RT[id]||['',''])[1]};});
+  SEED_PICKUPS.forEach(p=>{const{id,...r}=p;pickups[id]={...r,done:false};});
+  SEED_NOTES.forEach((t,i)=>notes['n'+i]={text:t});
+  const travel=seedTravel();
+  return{travel,
+    meta:{name:'UNREAL',date:'17.–18.07.2026',city:'Dortmund · Junkyard',
+      days:['Fr 17.07','Sa 18.07'],
+      floors:['Floor I Outdoor','Floor II Indoor','Floor III Indoor'],
+      hotelName:'Radisson Blu Hotel',hotelAddr:'Märkische Str. 31, 44141 Dortmund',hotelLat:51.5085,hotelLng:7.4685,
+      venueName:'Junkyard Club',venueAddr:'Ritterstr. 20, 44137 Dortmund',venueLat:51.5145,venueLng:7.4610,
+      archived:false,createdAt:Date.now()},
+    artists,pickups,notes};
+}
+
+/* ══ HELPERS ═════════════════════════════════════════════════════════ */
+/* Ein Veranstaltungstag läuft von 10:00 bis 10:00 am Folgetag.
+   Alles vor 10:00 gehört noch zur Nacht des Vortages.            */
+const NIGHT_END=10;
+const toMins=t=>{if(!t||!/^\d{1,2}:\d{2}$/.test(t))return 99999;const[h,m]=t.split(':').map(Number);return(h<NIGHT_END?h+24:h)*60+m;};
+/* aktuelle Uhrzeit auf dieselbe Achse legen */
+const nowMins=ts=>{const d=new Date(ts);return(d.getHours()<NIGHT_END?d.getHours()+24:d.getHours())*60+d.getMinutes();};
+/* "Fr 17.07" · "18.07." · "17.07.2026" → {d,mo} */
+const parseDayLabel=s=>{const m=String(s||'').match(/(\d{1,2})\s*\.\s*(\d{1,2})/);return m?{d:+m[1],mo:+m[2]}:null;};
+/* Datum, dem das Jetzt zugerechnet wird (nach Mitternacht noch der Vortag) */
+const eventDateOf=ts=>{const x=new Date(ts);if(x.getHours()<NIGHT_END)x.setDate(x.getDate()-1);return x;};
+/* Läuft dieser Tag gerade wirklich? Tag UND Monat müssen stimmen. */
+const isLiveDay=(label,ts)=>{
+  const p=parseDayLabel(label); if(!p) return false;
+  const e=eventDateOf(ts);
+  return e.getDate()===p.d && (e.getMonth()+1)===p.mo;
+};
+const obj2arr=o=>Object.entries(o||{}).map(([id,v])=>({id,...v}));
+const uid=()=>Math.random().toString(36).slice(2,10);
+const clockNow=()=>new Date().toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'});
+const mapsUrl=(a)=>`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(a||'')}`;
+const ago=ts=>{if(!ts)return'';const s=Math.floor((Date.now()-ts)/1000);
+  if(s<20)return'gerade eben';if(s<60)return s+'s her';if(s<3600)return Math.floor(s/60)+' min her';return Math.floor(s/3600)+' h her';};
+
+/* ══ UI ATOMS ════════════════════════════════════════════════════════ */
+function BackBtn({onClick,label='Zurück'}){
+  return(
+    <button onClick={onClick}
+      className="flex items-center gap-1.5 bg-zinc-800 border border-zinc-600 text-zinc-100 mono text-xs font-semibold px-3 py-2 rounded-lg active:bg-zinc-700 active:scale-95 transition-all flex-shrink-0 shadow-sm">
+      <span className="text-sm leading-none">←</span>{label}
+    </button>
+  );
+}
+function TopBar({title,sub,onBack,right,accent}){
+  return(
+    <div className="flex-shrink-0 sticky top-0 z-[60] bg-zinc-950/95 border-b border-zinc-800 safe-top"
+      style={{backdropFilter:'blur(18px) saturate(160%)'}}>
+      <div className="flex items-center gap-2.5 px-3 h-14">
+        {onBack&&<BackBtn onClick={onBack}/>}
+        <div className="flex-1 min-w-0">
+          <div className="bebas text-xl leading-none truncate" style={{color:accent||'#fafafa'}}>{title}</div>
+          {sub&&<div className="text-zinc-500 text-[10px] mono truncate mt-0.5">{sub}</div>}
+        </div>
+        {right}
+      </div>
+    </div>
+  );
+}
+function Tabs({tabs,active,onChange}){
+  return(
+    <div className="flex border-b border-zinc-800 bg-zinc-950 flex-shrink-0 sticky top-14 z-50 overflow-x-auto">
+      {tabs.map(t=>(
+        <button key={t.id} onClick={()=>onChange(t.id)}
+          className={`flex-1 min-w-[86px] py-3 bebas text-sm tracking-wider border-b-2 transition-all
+            ${active===t.id?'text-amber-400 border-amber-500':'text-zinc-600 border-transparent active:text-zinc-400'}`}>
+          {t.label}{t.badge>0&&<span className="ml-1.5 text-[10px] mono bg-amber-500 text-black px-1.5 py-0.5 rounded-full align-middle">{t.badge}</span>}
+        </button>
+      ))}
+    </div>
+  );
+}
+function Field({label,value,onChange,placeholder,type='text',cls=''}){
+  return(
+    <label className={`block ${cls}`}>
+      <div className="text-zinc-500 text-[10px] mono uppercase tracking-wider mb-1">{label}</div>
+      <input type={type} value={value??''} onChange={e=>onChange(e.target.value)} placeholder={placeholder}
+        className="w-full bg-zinc-900 border border-zinc-700 text-zinc-100 mono text-sm px-3 py-2.5 rounded-lg focus:border-amber-500 transition-colors placeholder-zinc-700"/>
+    </label>
+  );
+}
+function TimeEdit({value,onSave,cls='text-amber-400',size='text-sm'}){
+  const [ed,setEd]=useState(false);const [v,setV]=useState(value);
+  useEffect(()=>setV(value),[value]);
+  const commit=()=>{setEd(false);if(v!==value)onSave(v);};
+  if(ed)return <input value={v} onChange={e=>setV(e.target.value)} onBlur={commit}
+    onKeyDown={e=>{if(e.key==='Enter')commit();if(e.key==='Escape'){setV(value);setEd(false);}}}
+    autoFocus inputMode="numeric" placeholder="HH:MM"
+    className={`bg-zinc-800 border border-amber-500 text-amber-400 mono ${size} font-bold px-1.5 py-0.5 rounded w-[62px] text-center`}/>;
+  return <button onClick={()=>setEd(true)}
+    className={`mono font-bold ${size} ${cls} px-1.5 py-0.5 rounded border border-dashed border-zinc-800 hover:border-zinc-600 active:bg-zinc-800 transition-colors min-w-[58px]`}>
+    {value||'--:--'}</button>;
+}
+function TextEdit({value,onSave,cls='',placeholder='…'}){
+  const [ed,setEd]=useState(false);const [v,setV]=useState(value);
+  useEffect(()=>setV(value),[value]);
+  const commit=()=>{setEd(false);if(v!==value)onSave(v);};
+  if(ed)return <input value={v??''} onChange={e=>setV(e.target.value)} onBlur={commit}
+    onKeyDown={e=>{if(e.key==='Enter')commit();if(e.key==='Escape'){setV(value);setEd(false);}}} autoFocus placeholder={placeholder}
+    className={`bg-zinc-800 border border-amber-500 text-zinc-100 mono text-sm px-2 py-1 rounded w-full ${cls}`}/>;
+  return <button onClick={()=>setEd(true)} className={`text-left mono ${cls} active:opacity-60`}>{value||<span className="text-zinc-700">{placeholder}</span>}</button>;
+}
+function Check({checked,onToggle,size=28}){
+  return(
+    <button onClick={onToggle} style={{width:size,height:size}}
+      className={`rounded-lg border flex items-center justify-center flex-shrink-0 transition-all active:scale-90
+        ${checked?'bg-emerald-500 border-emerald-500':'border-zinc-600 bg-zinc-900 active:bg-zinc-800'}`}>
+      {checked&&<span className="text-black font-black" style={{fontSize:size*.45}}>✓</span>}
+    </button>
+  );
+}
+function Chip({label,checked,onToggle}){
+  return(
+    <button onClick={onToggle}
+      className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] mono border transition-all active:scale-95
+        ${checked?'bg-emerald-500/15 border-emerald-500/40 text-emerald-300':'bg-zinc-900 border-zinc-700/70 text-zinc-500 active:bg-zinc-800'}`}>
+      <span className={`w-3 h-3 rounded-sm border flex items-center justify-center flex-shrink-0 ${checked?'bg-emerald-500 border-emerald-500':'border-zinc-600'}`}>
+        {checked&&<span className="text-black text-[8px] font-black">✓</span>}</span>
+      {label}
+    </button>
+  );
+}
+function Sheet({open,onClose,title,children,onDelete}){
+  if(!open)return null;
+  return(
+    <div className="fixed inset-0 z-[100] flex items-end justify-center fade" style={{background:'rgba(0,0,0,.72)'}} onClick={onClose}>
+      <div onClick={e=>e.stopPropagation()} className="w-full max-w-lg bg-zinc-950 border-t border-zinc-700 rounded-t-2xl slide flex flex-col" style={{maxHeight:'92vh'}}>
+        <div className="flex items-center gap-3 px-4 py-3.5 border-b border-zinc-800 flex-shrink-0">
+          <div className="bebas text-lg text-white tracking-wider flex-1">{title}</div>
+          {onDelete&&<button onClick={onDelete} className="text-red-400 mono text-xs px-2.5 py-1.5 rounded-lg border border-red-500/30 bg-red-500/10 active:bg-red-500/20">Löschen</button>}
+          <button onClick={onClose} className="w-8 h-8 rounded-lg bg-zinc-800 border border-zinc-600 text-zinc-200 text-sm active:bg-zinc-700">✕</button>
+        </div>
+        <div className="overflow-y-auto px-4 py-4 safe-bot">{children}</div>
+      </div>
+    </div>
+  );
+}
+function Empty({children}){return <div className="text-zinc-700 mono text-sm text-center py-14 leading-relaxed whitespace-pre-line">{children}</div>;}
+function Toast(){
+  const [msgs,setMsgs]=useState([]);
+  const [offline,setOffline]=useState(false);
+  useEffect(()=>{
+    window.__fbErr=m=>{const id=uid();setMsgs(p=>[...p,{id,m}]);
+      setTimeout(()=>setMsgs(p=>p.filter(x=>x.id!==id)),7000);};
+    const r=db.ref('.info/connected');
+    const h=r.on('value',s=>setOffline(!s.val()));
+    return()=>{window.__fbErr=null;r.off('value',h);};
+  },[]);
+  return(
+    <div className="fixed left-0 right-0 bottom-0 z-[200] pointer-events-none flex flex-col items-center gap-2 px-4 pb-6">
+      {offline&&<div className="pointer-events-auto bg-amber-500 text-black mono text-[11px] font-bold px-3.5 py-2 rounded-lg shadow-lg">
+        ⚠ Keine Verbindung — Änderungen werden nachgeholt</div>}
+      {msgs.map(x=>(
+        <div key={x.id} className="pointer-events-auto max-w-sm bg-red-500 text-white mono text-[11px] px-3.5 py-2.5 rounded-lg shadow-lg leading-snug">{x.m}</div>))}
+    </div>
+  );
+}
+function SectionLabel({children,right}){
+  return <div className="flex items-center gap-2 mb-3 mt-1">
+    <div className="text-zinc-500 mono text-[10px] uppercase tracking-[.18em] flex-1">{children}</div>{right}</div>;
+}
+function AddBtn({onClick,children}){
+  return <button onClick={onClick}
+    className="w-full border border-dashed border-zinc-700 text-zinc-400 mono text-xs py-3 rounded-xl active:bg-zinc-900 active:text-zinc-200 transition-colors">
+    + {children}</button>;
+}
+
+/* ══ INSTALLATIONS-HINWEIS ═══════════════════════════════════════════ */
+const isStandalone=()=>window.matchMedia('(display-mode: standalone)').matches||window.navigator.standalone===true;
+const platform=()=>{
+  const ua=navigator.userAgent||'';
+  if(/iPad|iPhone|iPod/.test(ua)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1))return 'ios';
+  if(/Android/.test(ua))return 'android';
+  return 'desktop';
+};
+function InstallHint({onClose}){
+  const p=platform();
+  const [prompting,setPrompting]=useState(false);
+  const install=async()=>{
+    const ev=window.__installPrompt;
+    if(!ev)return;
+    setPrompting(true);
+    try{ ev.prompt(); await ev.userChoice; window.__installPrompt=null; onClose(); }
+    catch(e){ console.warn(e); }
+    finally{ setPrompting(false); }
+  };
+  const canPrompt=!!window.__installPrompt;
+  return(
+    <div className="fixed inset-0 z-[190] flex items-end justify-center fade" style={{background:'rgba(0,0,0,.75)'}} onClick={onClose}>
+      <div onClick={e=>e.stopPropagation()}
+        className="w-full max-w-lg bg-zinc-950 border-t border-zinc-700 rounded-t-2xl slide px-5 pt-5 safe-bot">
+        <div className="flex items-start gap-3 mb-4">
+          <div className="w-11 h-11 rounded-xl bg-zinc-900 border border-zinc-700 flex items-end justify-center gap-[3px] pb-2.5 flex-shrink-0">
+            <span className="w-[3px] h-5 bg-amber-500 rounded-full"/><span className="w-[3px] h-3 bg-zinc-100 rounded-full"/>
+            <span className="w-[3px] h-4 bg-zinc-100 rounded-full"/><span className="w-[3px] h-2.5 bg-amber-500 rounded-full"/>
+          </div>
+          <div className="flex-1">
+            <div className="bebas text-xl text-white tracking-wide leading-none">Als App speichern</div>
+            <div className="mono text-[11px] text-zinc-500 mt-1 leading-relaxed">
+              Dann liegt backstage.app als Symbol auf dem Homescreen, startet ohne Browserleiste und ist am Eventtag mit einem Tipp da.</div>
+          </div>
+        </div>
+
+        {p==='ios'&&(
+          <ol className="space-y-2.5 mb-4">
+            {[['Teilen antippen','Das Symbol unten in der Safari-Leiste — Quadrat mit Pfeil nach oben.'],
+              ['„Zum Home-Bildschirm"','In der Liste nach unten scrollen.'],
+              ['„Hinzufügen"','Oben rechts bestätigen — fertig.']].map((s,i)=>(
+              <li key={i} className="flex gap-3">
+                <span className="w-5 h-5 rounded-full bg-amber-500 text-black mono text-[10px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5">{i+1}</span>
+                <span className="flex-1"><span className="block mono text-[12px] text-zinc-100 font-bold">{s[0]}</span>
+                  <span className="block mono text-[10px] text-zinc-500 leading-snug">{s[1]}</span></span>
+              </li>))}
+          </ol>)}
+
+        {p==='android'&&(canPrompt?(
+          <button onClick={install} disabled={prompting}
+            className="w-full bg-amber-500 text-black bebas text-xl py-3 rounded-xl tracking-widest mb-3 active:scale-[.98]">
+            {prompting?'MOMENT…':'JETZT INSTALLIEREN'}</button>
+        ):(
+          <ol className="space-y-2.5 mb-4">
+            {[['Menü öffnen','Die drei Punkte oben rechts in Chrome.'],
+              ['„App installieren"','Oder „Zum Startbildschirm zufügen".']].map((s,i)=>(
+              <li key={i} className="flex gap-3">
+                <span className="w-5 h-5 rounded-full bg-amber-500 text-black mono text-[10px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5">{i+1}</span>
+                <span className="flex-1"><span className="block mono text-[12px] text-zinc-100 font-bold">{s[0]}</span>
+                  <span className="block mono text-[10px] text-zinc-500 leading-snug">{s[1]}</span></span>
+              </li>))}
+          </ol>))}
+
+        {p==='desktop'&&(canPrompt?(
+          <button onClick={install} className="w-full bg-amber-500 text-black bebas text-xl py-3 rounded-xl tracking-widest mb-3 active:scale-[.98]">
+            JETZT INSTALLIEREN</button>
+        ):(
+          <div className="mono text-[11px] text-zinc-400 leading-relaxed mb-4 bg-zinc-900 border border-zinc-800 rounded-xl px-3.5 py-3">
+            In Chrome oder Edge rechts in der Adressleiste auf das Installieren-Symbol klicken. Auf dem Handy geht es am bequemsten — öffne die Seite dort im Browser.</div>))}
+
+        <button onClick={onClose} className="w-full border border-zinc-700 text-zinc-400 mono text-xs py-3 rounded-xl active:bg-zinc-900 mb-2">
+          Später · im Browser weiter</button>
+      </div>
+    </div>
+  );
+}
+
+/* ══ LOGIN ═══════════════════════════════════════════════════════════ */
+function LoginScreen({onOffline,onInstall}){
+  const [mode,setMode]=useState('login');
+  const [f,setF]=useState({name:'',email:'',password:'',invite:'',wish:''});
+  const [err,setErr]=useState('');const [busy,setBusy]=useState(false);
+  const [firstEver,setFirstEver]=useState(null);
+  const set=(k,v)=>{setF(p=>({...p,[k]:v}));setErr('');};
+
+  useEffect(()=>{ fbOnce(USERS).then(d=>{
+      const n=d?Object.keys(d).length:0; setFirstEver(n===0); if(n===0)setMode('register');
+    }).catch(()=>setFirstEver(false)); },[]);
+
+  const login=async()=>{
+    if(!f.email||!f.password){setErr('E-Mail und Passwort eingeben.');return;}
+    setBusy(true);setErr('');
+    try{ await fbAuth.signInWithEmailAndPassword(f.email.trim(),f.password); }
+    catch(e){ setErr(AUTH_ERRORS[e.code]||('Anmeldung fehlgeschlagen ('+(e.code||e.message)+')')); }
+    finally{ setBusy(false); }
+  };
+  const register=async()=>{
+    if(!f.name.trim()||!f.email||!f.password){setErr('Alle Felder ausfüllen.');return;}
+    if(f.password.length<6){setErr('Passwort mindestens 6 Zeichen.');return;}
+    const code=f.invite.trim().toUpperCase();
+    const role=firstEver?'superadmin':INVITE_ROLES[code];
+    /* Ohne gültigen Code wird daraus eine Anfrage, die die Leitung freigibt. */
+    if(!firstEver&&code&&!role){setErr('Einladungscode stimmt nicht. Leer lassen, um Zugang anzufragen.');return;}
+    setBusy(true);setErr('');
+    try{
+      const cred=await fbAuth.createUserWithEmailAndPassword(f.email.trim(),f.password);
+      await db.ref(`${USERS}/${cred.user.uid}`).set({uid:cred.user.uid,name:f.name.trim(),
+        email:f.email.trim(),role:role||null,pending:role?null:true,
+        wish:role?null:(f.wish||null),active:true,createdAt:Date.now()});
+    }catch(e){ setErr(AUTH_ERRORS[e.code]||('Registrierung fehlgeschlagen ('+(e.code||e.message)+')')); }
+    finally{ setBusy(false); }
+  };
+  const reset=async()=>{
+    if(!f.email){setErr('E-Mail oben eintragen, dann nochmal tippen.');return;}
+    try{ await fbAuth.sendPasswordResetEmail(f.email.trim()); setErr('Link zum Zurücksetzen ist unterwegs.'); }
+    catch(e){ setErr(AUTH_ERRORS[e.code]||'Konnte keine E-Mail senden.'); }
+  };
+  const isReg=mode==='register';
+
+  return(
+    <div className="min-h-screen flex flex-col items-center justify-center px-8 safe-top safe-bot">
+      <div className="w-full max-w-[320px]">
+        <div className="bebas text-[58px] leading-none text-white tracking-[.06em]">backstage<span className="text-amber-500">.app</span></div>
+        <div className="text-zinc-600 text-[11px] mono mb-10 tracking-widest">CREW OPERATIONS</div>
+
+        {firstEver&&(
+          <div className="mb-4 bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2.5 mono text-[11px] text-amber-300 leading-relaxed">
+            Noch kein Konto vorhanden — das erste wird automatisch Superadmin.</div>)}
+
+        <div className="space-y-2.5">
+          {isReg&&(
+            <input value={f.name} onChange={e=>set('name',e.target.value)} placeholder="Dein Name" autoComplete="name"
+              className="w-full bg-zinc-900 border border-zinc-700 text-white mono text-sm px-4 py-3.5 rounded-xl focus:border-amber-500 placeholder-zinc-700 transition-colors"/>)}
+          <input value={f.email} onChange={e=>set('email',e.target.value)} placeholder="E-Mail"
+            type="email" autoComplete="email" inputMode="email" autoCapitalize="off"
+            className="w-full bg-zinc-900 border border-zinc-700 text-white mono text-sm px-4 py-3.5 rounded-xl focus:border-amber-500 placeholder-zinc-700 transition-colors"/>
+          <input value={f.password} onChange={e=>set('password',e.target.value)} placeholder="Passwort"
+            type="password" autoComplete={isReg?'new-password':'current-password'}
+            onKeyDown={e=>e.key==='Enter'&&(isReg?register():login())}
+            className="w-full bg-zinc-900 border border-zinc-700 text-white mono text-sm px-4 py-3.5 rounded-xl focus:border-amber-500 placeholder-zinc-700 transition-colors"/>
+          {isReg&&!firstEver&&(
+            <>
+              <input value={f.invite} onChange={e=>set('invite',e.target.value.toUpperCase())} placeholder="Einladungscode (falls vorhanden)"
+                autoCapitalize="characters" autoComplete="off"
+                onKeyDown={e=>e.key==='Enter'&&register()}
+                className="w-full bg-zinc-900 border border-zinc-700 text-white mono text-sm px-4 py-3.5 rounded-xl focus:border-amber-500 placeholder-zinc-700 tracking-widest transition-colors"/>
+              {!f.invite.trim()&&(
+                <select value={f.wish} onChange={e=>set('wish',e.target.value)}
+                  className="w-full bg-zinc-900 border border-zinc-700 text-zinc-300 mono text-sm px-4 py-3.5 rounded-xl focus:border-amber-500">
+                  <option value="">Wofür brauchst du Zugang?</option>
+                  <option value="leitung">Leitung</option>
+                  <option value="einlass">Einlass</option>
+                  <option value="fahrer">Fahrer</option>
+                </select>)}
+              <div className="mono text-[10px] text-zinc-600 leading-relaxed px-1">
+                {f.invite.trim()
+                  ?'Mit Code bekommst du sofort Zugang.'
+                  :'Ohne Code wird daraus eine Anfrage — die Leitung gibt dich frei. Dein Passwort wählst du selbst, niemand sieht es.'}
+              </div>
+            </>)}
+        </div>
+
+        {err&&<div className="text-amber-300 text-[11px] mono mt-3 leading-relaxed">{err}</div>}
+
+        <button onClick={isReg?register:login} disabled={busy}
+          className={`w-full mt-4 bebas text-2xl py-3.5 rounded-xl tracking-[.15em] transition-all
+            ${busy?'bg-zinc-800 text-zinc-600':'bg-amber-500 text-black active:scale-[.98]'}`}>
+          {busy?'MOMENT…':isReg?(f.invite.trim()||firstEver?'KONTO ERSTELLEN':'ZUGANG ANFRAGEN'):'ANMELDEN'}</button>
+
+        {!firstEver&&(
+          <button onClick={()=>{setMode(isReg?'login':'register');setErr('');}}
+            className="w-full mt-3 mono text-[11px] text-zinc-500 active:text-zinc-300 py-1">
+            {isReg?'Ich habe schon ein Konto → Anmelden':'Neu hier? → Konto erstellen oder Zugang anfragen'}</button>)}
+        {!isReg&&(
+          <button onClick={reset} className="w-full mono text-[10px] text-zinc-700 active:text-zinc-400 py-1">
+            Passwort vergessen</button>)}
+
+        <div className="mt-8 border-t border-zinc-900 pt-2 space-y-1">
+          {!isStandalone()&&(
+            <button onClick={onInstall}
+              className="w-full mono text-[10px] text-amber-500/70 active:text-amber-400 py-2">
+              📲 Als App auf dem Homescreen speichern</button>)}
+          <button onClick={onOffline}
+            className="w-full mono text-[10px] text-zinc-700 active:text-zinc-400 py-2">
+            Ohne Anmeldung testen · nur dieses Gerät</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+/* Beim ersten Öffnen mit Startpasswort: eigenes Passwort setzen */
+function SetPassword({user,onDone,onLogout}){
+  const [p1,setP1]=useState('');const [p2,setP2]=useState('');
+  const [err,setErr]=useState('');const [busy,setBusy]=useState(false);
+  const save=async()=>{
+    if(p1.length<6){setErr('Mindestens 6 Zeichen.');return;}
+    if(p1!==p2){setErr('Die beiden Eingaben stimmen nicht überein.');return;}
+    setBusy(true);setErr('');
+    try{
+      await fbAuth.currentUser.updatePassword(p1);
+      await fbUpd(`${USERS}/${user.uid}`,{mustSetPassword:null});
+      onDone();
+    }catch(e){
+      setErr(e.code==='auth/requires-recent-login'
+        ? 'Aus Sicherheitsgründen bitte einmal ab- und wieder anmelden, dann klappt es.'
+        : (AUTH_ERRORS[e.code]||('Fehler: '+(e.code||e.message))));
+    }finally{ setBusy(false); }
+  };
+  return(
+    <div className="min-h-screen flex flex-col items-center justify-center px-8 safe-top safe-bot">
+      <div className="w-full max-w-[300px]">
+        <div className="bebas text-3xl text-white tracking-wide leading-none">Eigenes Passwort setzen</div>
+        <div className="mono text-[11px] text-zinc-500 mt-2 mb-6 leading-relaxed">
+          Willkommen, {user.name||user.email}. Wähl ein Passwort, das nur du kennst — das Startpasswort gilt danach nicht mehr.</div>
+        <div className="space-y-2.5">
+          <input type="password" value={p1} onChange={e=>{setP1(e.target.value);setErr('');}} placeholder="Neues Passwort"
+            autoComplete="new-password"
+            className="w-full bg-zinc-900 border border-zinc-700 text-white mono text-sm px-4 py-3.5 rounded-xl focus:border-amber-500 placeholder-zinc-700"/>
+          <input type="password" value={p2} onChange={e=>{setP2(e.target.value);setErr('');}} placeholder="Nochmal zur Sicherheit"
+            autoComplete="new-password" onKeyDown={e=>e.key==='Enter'&&save()}
+            className="w-full bg-zinc-900 border border-zinc-700 text-white mono text-sm px-4 py-3.5 rounded-xl focus:border-amber-500 placeholder-zinc-700"/>
+        </div>
+        {err&&<div className="mono text-[11px] text-amber-300 mt-3 leading-relaxed">{err}</div>}
+        <button onClick={save} disabled={busy}
+          className={`w-full mt-4 bebas text-xl py-3.5 rounded-xl tracking-widest ${busy?'bg-zinc-800 text-zinc-600':'bg-amber-500 text-black active:scale-[.98]'}`}>
+          {busy?'MOMENT…':'SPEICHERN UND LOSLEGEN'}</button>
+        <button onClick={onLogout} className="w-full mt-3 mono text-[10px] text-zinc-700 active:text-zinc-400 py-2">Abmelden</button>
+      </div>
+    </div>
+  );
+}
+
+/* Konto vorhanden, aber keine Rolle für diese App */
+function NoAccess({user,onLogout}){
+  const waiting=!!user.pending;
+  return(
+    <div className="min-h-screen flex flex-col items-center justify-center px-8 text-center gap-4">
+      <div className={`bebas text-3xl tracking-wider ${waiting?'text-amber-400':'text-zinc-400'}`}>
+        {waiting?'ANFRAGE LÄUFT':'KEIN ZUGANG'}</div>
+      {waiting?(
+        <>
+          <div className="flex gap-1.5">
+            {[0,1,2].map(i=><span key={i} className="w-2 h-2 rounded-full bg-amber-500/60"
+              style={{animation:`fd .7s ${i*.15}s infinite alternate`}}/>)}</div>
+          <div className="mono text-xs text-zinc-400 leading-relaxed max-w-[290px]">
+            Dein Konto <span className="text-zinc-200">{user.email}</span> ist angelegt und dein Passwort gespeichert.
+            Die Leitung muss dich nur noch freigeben{user.wish?<> — angefragt als <span className="text-amber-300">{ROLES[user.wish]?.label||user.wish}</span></>:null}.</div>
+          <div className="mono text-[11px] text-zinc-600 leading-relaxed max-w-[280px]">
+            Sobald das erledigt ist, öffnet sich die App hier von selbst. Diese Seite kann offen bleiben.</div>
+        </>
+      ):(
+        <div className="mono text-xs text-zinc-400 leading-relaxed max-w-[280px]">
+          Dein Konto <span className="text-zinc-200">{user.email}</span> hat in dieser App keine Rolle
+          {user.role?<> (hinterlegt: <span className="text-zinc-300">{user.role}</span>)</>:null}.
+          Die Leitung kann dich unter Team freischalten.</div>
+      )}
+      <button onClick={onLogout} className="border border-zinc-700 text-zinc-300 mono text-xs px-5 py-2.5 rounded-xl active:bg-zinc-900 mt-2">Abmelden</button>
+    </div>
+  );
+}
+
+/* ══ EVENT LIST ══════════════════════════════════════════════════════ */
+function EventList({events,onOpen,canManage,onCreate,onDelete,role,onLogout,onSwitchRole,onTeam,me,pendingCount,restricted}){
+  const [showArch,setShowArch]=useState(false);
+  const list=obj2arr(events).map(e=>({id:e.id,...(e.meta||{}),_artists:Object.keys(e.artists||{}).length,_pickups:Object.keys(e.pickups||{}).length}))
+    .filter(e=>showArch?e.archived:!e.archived)
+    .sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+  return(
+    <div className="min-h-screen flex flex-col">
+      <TopBar title="EVENTS" sub={me?.name?`${me.name} · ${ROLES[role].label}`:ROLES[role].label}
+        right={<div className="flex gap-1.5">
+          {onTeam&&<button onClick={onTeam} className="relative text-zinc-400 mono text-[11px] px-2 py-1.5 border border-zinc-700 rounded-lg active:bg-zinc-800">
+            Team
+            {pendingCount>0&&<span className="absolute -top-1.5 -right-1.5 bg-amber-500 text-black mono text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center">{pendingCount}</span>}
+          </button>}
+          <button onClick={onLogout} className="text-zinc-500 mono text-[11px] px-2 py-1.5 border border-zinc-700 rounded-lg active:bg-zinc-800">Logout</button>
+        </div>}/>
+      {role==='superadmin'&&<SuperBar onSwitchRole={onSwitchRole} active="events"/>}
+      <div className="flex-1 overflow-y-auto px-4 pt-4 safe-bot">
+        <div className="flex gap-2 mb-4">
+          <button onClick={()=>setShowArch(false)} className={`flex-1 py-2 rounded-lg mono text-xs border transition-all ${!showArch?'bg-amber-500/10 border-amber-500/40 text-amber-400':'bg-zinc-900 border-zinc-800 text-zinc-500'}`}>Aktiv</button>
+          <button onClick={()=>setShowArch(true)}  className={`flex-1 py-2 rounded-lg mono text-xs border transition-all ${showArch?'bg-amber-500/10 border-amber-500/40 text-amber-400':'bg-zinc-900 border-zinc-800 text-zinc-500'}`}>Archiv</button>
+        </div>
+        {list.length===0&&<Empty>{showArch?'Kein archiviertes Event.'
+          :restricted?'Dir ist noch kein Event zugewiesen.\nDie Leitung kann das unter Team ändern.'
+          :'Noch kein Event angelegt.'}</Empty>}
+        <div className="space-y-2.5">
+          {list.map(e=>(
+            <button key={e.id} onClick={()=>onOpen(e.id)}
+              className="w-full text-left bg-zinc-900/70 border border-zinc-800 rounded-xl px-4 py-4 active:bg-zinc-900 active:scale-[.99] transition-all">
+              <div className="flex items-start gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="bebas text-2xl text-white tracking-wider leading-none">{e.name||'Ohne Titel'}</div>
+                  <div className="text-zinc-400 mono text-xs mt-1.5">{e.date}</div>
+                  <div className="text-zinc-600 mono text-[11px] mt-0.5">{e.city}</div>
+                  <div className="flex gap-3 mt-2.5">
+                    <span className="text-zinc-600 mono text-[10px]">🎧 {e._artists} Artists</span>
+                    <span className="text-zinc-600 mono text-[10px]">🚐 {e._pickups} Pickups</span>
+                  </div>
+                </div>
+                <span className="text-zinc-700 text-lg">›</span>
+              </div>
+            </button>
+          ))}
+        </div>
+        {canManage&&<div className="mt-4"><AddBtn onClick={onCreate}>Neues Event anlegen</AddBtn></div>}
+      </div>
+    </div>
+  );
+}
+
+/* ══ SUPERADMIN ROLE SWITCHER ════════════════════════════════════════ */
+function SuperBar({onSwitchRole,active}){
+  const items=[
+    {id:'events', l:'EVENTS',  c:'#a1a1aa'},
+    {id:'leitung',l:'LEITUNG', c:'#f59e0b'},
+    {id:'einlass',l:'EINLASS', c:'#10b981'},
+    {id:'fahrer', l:'FAHRER',  c:'#3b82f6'},
+    {id:'admin',  l:'VERWALTEN',c:'#f472b6'},
+    {id:'team',   l:'TEAM',    c:'#e879f9'},
+  ];
+  return(
+    <div className="flex-shrink-0 bg-zinc-900/60 border-b border-zinc-800 px-2 py-2 flex gap-1.5 overflow-x-auto">
+      <span className="text-[9px] mono text-zinc-600 uppercase tracking-widest self-center px-1 flex-shrink-0">Admin</span>
+      {items.map(i=>(
+        <button key={i.id} onClick={()=>onSwitchRole(i.id)}
+          className="flex-shrink-0 px-2.5 py-1.5 rounded-lg mono text-[10px] font-bold border transition-all active:scale-95"
+          style={active===i.id
+            ?{color:i.c,borderColor:i.c+'66',background:i.c+'1a'}
+            :{color:'#71717a',borderColor:'#27272a',background:'#18181b'}}>
+          {i.l}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/* ══ MAP ═════════════════════════════════════════════════════════════ */
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+/* Ist Leaflet wirklich einsatzbereit? */
+const hasLeaflet=()=>typeof L!=='undefined'&&L&&typeof L.map==='function';
+/* Bei Bedarf zur Laufzeit nachladen — mehrere Quellen nacheinander */
+let _leafletTry=null;
+function loadLeaflet(){
+  if(hasLeaflet())return Promise.resolve(true);
+  if(_leafletTry)return _leafletTry;
+  const SRC=[
+    ['cdnjs','https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css','https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js'],
+    ['jsDelivr','https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css','https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js'],
+    ['unpkg','https://unpkg.com/leaflet@1.9.4/dist/leaflet.css','https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'],
+  ];
+  _leafletTry=new Promise(res=>{
+    let i=0;
+    const next=()=>{
+      if(hasLeaflet())return res(true);
+      if(i>=SRC.length)return res(false);
+      const [name,cssUrl,jsUrl]=SRC[i++];
+      const css=document.createElement('link');css.rel='stylesheet';css.href=cssUrl;document.head.appendChild(css);
+      const s=document.createElement('script');s.src=jsUrl;
+      s.onload=()=>{ (window.__leafletLog||[]).push(name+(hasLeaflet()?' ✓':' ✗')); hasLeaflet()?res(true):next(); };
+      s.onerror=()=>{ (window.__leafletLog||[]).push(name+' ✗'); next(); };
+      document.head.appendChild(s);
+    };
+    next();
+  });
+  return _leafletTry;
+}
+const okCoord=(a,b)=>Number.isFinite(+a)&&Number.isFinite(+b)&&Math.abs(+a)<=90&&Math.abs(+b)<=180;
+
+function MapPanel({meta,drivers}){
+  const el=useRef(null),map=useRef(null),layer=useRef(null);
+  const [fail,setFail]=useState('');
+  /* Nur die Werte, die die Karte wirklich betreffen — verhindert Dauerneuzeichnen */
+  const sig=JSON.stringify([
+    meta.hotelLat,meta.hotelLng,meta.hotelName,meta.hotelAddr,
+    meta.venueLat,meta.venueLng,meta.venueName,meta.venueAddr,
+    drivers.map(d=>[d.id,d.active,d.lat,d.lng,d.name,d.updatedAt]),
+  ]);
+
+  const [ready,setReady]=useState(false);
+  const [tick,setTick]=useState(0);          // erlaubt erneuten Versuch ohne Neuladen
+  useEffect(()=>{
+    let dead=false;
+    const build=()=>{
+      if(dead||!el.current||map.current)return true;
+      try{
+        const lat=Number.isFinite(+meta.venueLat)?+meta.venueLat:51.5145;
+        const lng=Number.isFinite(+meta.venueLng)?+meta.venueLng:7.4610;
+        map.current=L.map(el.current,{zoomControl:true,attributionControl:true}).setView([lat,lng],13);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map.current);
+        layer.current=L.layerGroup().addTo(map.current);
+        setFail('');setReady(true);
+        // mehrfach nachmessen: der Container bekommt seine Höhe erst nach dem Layout
+        [60,200,600].forEach(ms=>setTimeout(()=>{try{map.current&&map.current.invalidateSize();}catch(e){}},ms));
+        return true;
+      }catch(e){ console.error('[Karte]',e); setFail('Karte konnte nicht aufgebaut werden: '+(e.message||e)); return false; }
+    };
+    /* Leaflet direkt prüfen — nicht auf ein Versprechen verlassen */
+    if(hasLeaflet()){ build(); return()=>{dead=true;try{map.current&&map.current.remove();}catch(e){}map.current=null;layer.current=null;}; }
+    /* sonst: warten bzw. selbst nachladen */
+    loadLeaflet().then(ok=>{
+      if(dead)return;
+      if(ok&&hasLeaflet()) build();
+      else setFail('Kartenbibliothek (Leaflet) lässt sich nicht laden. Prüf die Internetverbindung oder einen Blocker im Browser.');
+    });
+    return()=>{ dead=true; try{map.current&&map.current.remove();}catch(e){} map.current=null;layer.current=null; };
+  },[tick]);
+
+  useEffect(()=>{
+    if(fail||!ready||!map.current||!layer.current)return;
+    try{
+      layer.current.clearLayers();
+      const pts=[];
+      const bubble=(bg,fg,txt,sub,subFg,tail)=>
+        `<div style="display:flex;flex-direction:column;align-items:center;transform:translate(-50%,-100%)">
+           <div style="background:${bg};color:${fg};font:700 11px 'IBM Plex Mono',monospace;padding:3px 7px;border-radius:6px;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.6)">${txt}</div>
+           ${sub?`<div style="background:rgba(9,9,11,.9);color:${subFg};font:400 9px 'IBM Plex Mono',monospace;padding:2px 6px;border-radius:4px;margin-top:2px;white-space:nowrap;max-width:200px;overflow:hidden;text-overflow:ellipsis">${sub}</div>`:''}
+           ${tail}
+         </div>`;
+      const pin=(lat,lng,html)=>{
+        if(!okCoord(lat,lng))return;
+        pts.push([+lat,+lng]);
+        L.marker([+lat,+lng],{icon:L.divIcon({className:'',html,iconSize:[0,0]})}).addTo(layer.current);
+      };
+      pin(meta.hotelLat,meta.hotelLng,bubble('#fbbf24','#09090b',
+        '🏨 '+esc(meta.hotelName||'Hotel'),esc(meta.hotelAddr),'#a1a1aa','<div style="width:2px;height:9px;background:#fbbf24"></div>'));
+      pin(meta.venueLat,meta.venueLng,bubble('#f472b6','#09090b',
+        '📍 '+esc(meta.venueName||'Venue'),esc(meta.venueAddr),'#a1a1aa','<div style="width:2px;height:9px;background:#f472b6"></div>'));
+      drivers.forEach(d=>{
+        if(!d.active||!okCoord(d.lat,d.lng))return;
+        L.circle([+d.lat,+d.lng],{radius:110,color:'#3b82f6',weight:1,fillColor:'#3b82f6',fillOpacity:.13}).addTo(layer.current);
+        pin(d.lat,d.lng,bubble('#3b82f6','#fff','🚐 '+esc(d.name||'Fahrer'),
+          esc(ago(d.updatedAt)),'#93c5fd','<div class="drv-pin" style="margin-top:3px"></div>'));
+      });
+      if(pts.length>1)map.current.fitBounds(L.latLngBounds(pts),{padding:[55,55],maxZoom:15});
+      else if(pts.length===1)map.current.setView(pts[0],14);
+    }catch(e){ console.error('[Karte zeichnen]',e); setFail('Karte konnte nicht gezeichnet werden: '+(e.message||e)); }
+  },[sig,fail,ready]);
+
+  if(fail)return(
+    <div className="w-full h-full flex flex-col items-center justify-center gap-3 px-6 text-center">
+      <div className="text-3xl opacity-40">🗺</div>
+      <div className="mono text-[11px] text-zinc-400 leading-relaxed max-w-[280px]">{fail}</div>
+      <div className="mono text-[10px] text-zinc-600 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2">
+        Quellen: {(window.__leafletLog||[]).join(' · ')||'—'}</div>
+      <div className="flex gap-2">
+        <button onClick={()=>{_leafletTry=null;setFail('');setTick(t=>t+1);}}
+          className="mono text-[11px] text-black bg-amber-500 font-bold px-4 py-2 rounded-xl active:scale-95">
+          Nochmal versuchen</button>
+        <button onClick={()=>location.reload()}
+          className="mono text-[11px] text-zinc-300 border border-zinc-600 bg-zinc-800 px-4 py-2 rounded-xl active:bg-zinc-700">
+          Neu laden</button>
+      </div>
+      <div className="mono text-[10px] text-zinc-600">Die Fahrerliste unten funktioniert weiterhin.</div>
+    </div>);
+  return <div ref={el} className="w-full h-full" style={{minHeight:240,background:'#18181b'}}/>;
+}
+
+function DriverPanel({meta,drivers}){
+  const active=drivers.filter(d=>d.active);
+  return(
+    <div className="flex flex-col h-full">
+      <div className="flex-shrink-0 px-4 py-2.5 border-b border-zinc-800 flex items-center gap-2">
+        <span className={`w-2 h-2 rounded-full ${active.length?'bg-blue-400':'bg-zinc-700'}`}/>
+        <span className="mono text-[11px] text-zinc-400">
+          {active.length?`${active.length} Fahrer live`:'Kein Fahrer teilt gerade seinen Standort'}</span>
+      </div>
+      <div className="flex-1 min-h-[300px]"><MapPanel meta={meta} drivers={drivers}/></div>
+      <div className="flex-shrink-0 border-t border-zinc-800 max-h-[38%] overflow-y-auto safe-bot">
+        {drivers.length===0&&<div className="px-4 py-5 text-zinc-700 mono text-xs text-center">Noch kein Fahrer eingeloggt.</div>}
+        {drivers.map(d=>(
+          <div key={d.id} className="flex items-center gap-3 px-4 py-3 border-b border-zinc-800/60">
+            <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${d.active?'bg-blue-400':'bg-zinc-700'}`}/>
+            <div className="flex-1 min-w-0">
+              <div className="mono text-sm font-bold text-zinc-100 truncate">{d.name||'Fahrer'}</div>
+              <div className="mono text-[10px] text-zinc-500">{d.active?`aktualisiert ${ago(d.updatedAt)}`:'offline'}</div>
+            </div>
+            {d.active&&d.lat!=null&&(
+              <a href={`https://www.google.com/maps/dir/?api=1&destination=${d.lat},${d.lng}`} target="_blank" rel="noopener"
+                className="mono text-[10px] text-blue-300 border border-blue-500/30 bg-blue-500/10 px-2.5 py-1.5 rounded-lg active:bg-blue-500/20">Route ↗</a>)}
+          </div>
+        ))}
+        <div className="px-4 py-3 space-y-2">
+          <a href={mapsUrl(meta.hotelAddr)} target="_blank" rel="noopener" className="block bg-zinc-900 border border-zinc-800 rounded-xl px-3.5 py-2.5 active:bg-zinc-800">
+            <div className="mono text-[10px] text-zinc-500">🏨 HOTEL</div>
+            <div className="mono text-xs font-bold text-zinc-100 mt-0.5">{meta.hotelName}</div>
+            <div className="mono text-[10px] text-blue-400">{meta.hotelAddr} ↗</div></a>
+          <a href={mapsUrl(meta.venueAddr)} target="_blank" rel="noopener" className="block bg-zinc-900 border border-zinc-800 rounded-xl px-3.5 py-2.5 active:bg-zinc-800">
+            <div className="mono text-[10px] text-zinc-500">📍 VENUE</div>
+            <div className="mono text-xs font-bold text-zinc-100 mt-0.5">{meta.venueName}</div>
+            <div className="mono text-[10px] text-blue-400">{meta.venueAddr} ↗</div></a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ══ LINEUP ══════════════════════════════════════════════════════════ */
+function Lineup({ev,base,editable}){
+  const meta=ev.meta||{};
+  const days=meta.days||[];const floors=meta.floors||[];
+  const [day,setDay]=useState(days[0]);
+  const [floor,setFloor]=useState('ALL');
+  const [edit,setEdit]=useState(null);
+  useEffect(()=>{if(!days.includes(day))setDay(days[0]);},[days.join('|')]);
+  const artists=obj2arr(ev.artists).filter(a=>a.day===day&&(floor==='ALL'||a.floor===floor))
+    .sort((a,b)=>toMins(a.setStart)-toMins(b.setStart));
+  const st=ev.status||{};
+  const keysFor=a=>{
+    const k=[];
+    if(obj2arr(ev.pickups).some(p=>p.artistId===a.id)||a.contactPhone)k.push('pickup_ok');
+    k.push('im_club','rider_ok');
+    if(a.soundcheck)k.push('soundcheck_ok');
+    k.push('set_start','set_end','ausgecheckt');
+    return k;
+  };
+  const setSt=(aid,k,v)=>fbSet(`${base}/status/${aid}/${k}`,v);
+  const upd=(aid,patch)=>fbUpd(`${base}/artists/${aid}`,patch);
+
+  return(
+    <div className="pb-24">
+      <div className="flex gap-2 px-4 pt-4 pb-2">
+        {days.map(d=>(
+          <button key={d} onClick={()=>setDay(d)}
+            className={`flex-1 py-2.5 rounded-lg mono text-sm font-bold border transition-all active:scale-[.98]
+              ${day===d?'bg-amber-500/10 border-amber-500/40 text-amber-400':'bg-zinc-900 border-zinc-800 text-zinc-500'}`}>{d}</button>
+        ))}
+      </div>
+      <div className="flex gap-1.5 px-4 pb-4 overflow-x-auto">
+        <button onClick={()=>setFloor('ALL')}
+          className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-[11px] mono font-bold border transition-all
+            ${floor==='ALL'?'text-zinc-100 border-zinc-500 bg-zinc-800':'text-zinc-600 border-zinc-800 bg-zinc-900'}`}>Alle</button>
+        {floors.map(f=>{const c=facc(floors,f);
+          return <button key={f} onClick={()=>setFloor(f)}
+            className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-[11px] mono font-bold border transition-all
+              ${floor===f?`${c.t} ${c.b} ${c.bg}`:'text-zinc-600 border-zinc-800 bg-zinc-900'}`}>{f}</button>;})}
+      </div>
+      <div className="px-4 space-y-2.5">
+        {artists.length===0&&<Empty>Kein Line-up für {day}{floor!=='ALL'?` · ${floor}`:''}.</Empty>}
+        {artists.map(a=>{
+          const s=st[a.id]||{};const keys=keysFor(a);
+          const pct=Math.round(keys.filter(k=>s[k]).length/keys.length*100);
+          const live=s.set_start&&!s.set_end;const done=!!s.set_end;
+          const c=facc(floors,a.floor);
+          return(
+            <div key={a.id} className={`rounded-xl border transition-all
+              ${done?'border-zinc-800/50 bg-zinc-900/25 opacity-45':live?'border-emerald-500/45 bg-emerald-950/25':'border-zinc-800 bg-zinc-900/55'}`}>
+              <div className="flex gap-3 px-3.5 py-3">
+                <div className="w-[62px] flex-shrink-0 text-center pt-0.5">
+                  {editable
+                    ?<><TimeEdit value={a.setStart} onSave={v=>upd(a.id,{setStart:v})}/>
+                       <div className="text-zinc-700 text-[10px] leading-tight">│</div>
+                       <TimeEdit value={a.setEnd} onSave={v=>upd(a.id,{setEnd:v})} cls="text-zinc-500" size="text-xs"/></>
+                    :<><div className="mono text-sm font-bold text-amber-400">{a.setStart}</div>
+                       <div className="mono text-xs text-zinc-500">{a.setEnd}</div></>}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap mb-1">
+                    <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${live?'bg-emerald-400':done?'bg-zinc-700':'bg-zinc-600'}`}/>
+                    <span className="text-white font-bold text-sm mono truncate">{a.name}</span>
+                    {floor==='ALL'&&<span className={`text-[9px] mono px-1.5 py-0.5 rounded border ${c.t} ${c.b} ${c.bg}`}>{a.floor}</span>}
+                    {a.soundcheck&&<span className="text-[9px] mono bg-violet-500/15 text-violet-300 border border-violet-500/30 px-1.5 py-0.5 rounded">SC {a.soundcheck}</span>}
+                    {editable&&<button onClick={()=>setEdit(a)} className="ml-auto text-zinc-600 text-xs px-1.5 active:text-amber-400">✎</button>}
+                  </div>
+                  {a.notes&&<div className={`text-[11px] mono mb-2 leading-snug ${a.notes.startsWith('⚠')?'text-red-300':'text-zinc-500'}`}>{a.notes}</div>}
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="flex-1 h-1 bg-zinc-800 rounded-full overflow-hidden">
+                      <div className="h-full rounded-full transition-all" style={{width:pct+'%',background:pct===100?'#10b981':'#f59e0b'}}/></div>
+                    <span className="text-[10px] text-zinc-600 mono w-8 text-right">{pct}%</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {keys.map(k=>{const lb=STATUS_ALL.find(x=>x.k===k)?.l||k;
+                      return <Chip key={k} label={lb} checked={!!s[k]} onToggle={()=>setSt(a.id,k,!s[k])}/>;})}
+                  </div>
+                  {a.contactPhone&&(
+                    <a href={`tel:${a.contactPhone}`} className="flex items-center gap-1.5 mt-2 text-[11px] mono text-zinc-500 active:text-blue-300">
+                      📞 {a.contactName||'Kontakt'} · {a.contactPhone}</a>)}
+                  <RiderBlock a={a} base={base} editable={editable}/>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+        {editable&&<div className="pt-1"><AddBtn onClick={()=>setEdit({_new:true,day,floor:floor==='ALL'?floors[0]:floor,setStart:'',setEnd:'',name:''})}>Artist hinzufügen</AddBtn></div>}
+      </div>
+      <ArtistSheet a={edit} meta={meta} onClose={()=>setEdit(null)}
+        onSave={(id,data)=>{fbSet(`${base}/artists/${id}`,data);setEdit(null);}}
+        onDelete={id=>{fbDel(`${base}/artists/${id}`);fbDel(`${base}/status/${id}`);setEdit(null);}}/>
+    </div>
+  );
+}
+/* Rider / Techrider — aufklappbar, Häkchen pro Position */
+function RiderBlock({a,base,editable}){
+  const [open,setOpen]=useState(null);
+  const rider=parseRider(a.rider);
+  const done=a.riderDone||{};
+  if(!a.rider&&!a.tech)return null;
+  const nDone=rider.filter((_,i)=>done[i]).length;
+  return(
+    <div className="mt-2 pt-2 border-t border-zinc-800/70">
+      <div className="flex gap-1.5 flex-wrap">
+        {a.rider&&(
+          <button onClick={()=>setOpen(open==='r'?null:'r')}
+            className={`flex items-center gap-1.5 px-2 py-1 rounded-md mono text-[10px] border transition-all
+              ${open==='r'?'bg-amber-500/15 border-amber-500/40 text-amber-300':'bg-zinc-900 border-zinc-700/70 text-zinc-500'}`}>
+            🍾 Rider <span className={nDone===rider.length?'text-emerald-400':'text-zinc-600'}>{nDone}/{rider.length}</span></button>)}
+        {a.tech&&(
+          <button onClick={()=>setOpen(open==='t'?null:'t')}
+            className={`flex items-center gap-1.5 px-2 py-1 rounded-md mono text-[10px] border transition-all
+              ${open==='t'?'bg-violet-500/15 border-violet-500/40 text-violet-300':'bg-zinc-900 border-zinc-700/70 text-zinc-500'}`}>
+            🎛 Techrider</button>)}
+      </div>
+      {open==='r'&&(
+        <div className="mt-2 bg-zinc-950/70 border border-zinc-800 rounded-lg p-2 space-y-0.5 fade">
+          {rider.map((it,i)=>(
+            <button key={i} onClick={()=>fbSet(`${base}/artists/${a.id}/riderDone/${i}`,!done[i])}
+              className="w-full flex items-center gap-2 py-1 px-1 rounded active:bg-zinc-900 text-left">
+              <span className={`w-3.5 h-3.5 rounded-sm border flex items-center justify-center flex-shrink-0
+                ${done[i]?'bg-emerald-500 border-emerald-500':'border-zinc-600'}`}>
+                {done[i]&&<span className="text-black text-[8px] font-black">✓</span>}</span>
+              {it.qty>1&&<span className="mono text-[10px] text-amber-500 font-bold w-6 flex-shrink-0">{it.qty}×</span>}
+              <span className={`mono text-[11px] flex-1 ${done[i]?'text-zinc-600 line-through':'text-zinc-300'}`}>{it.name}</span>
+            </button>))}
+        </div>)}
+      {open==='t'&&(
+        <div className="mt-2 bg-zinc-950/70 border border-zinc-800 rounded-lg p-2.5 fade">
+          {editable
+            ?<TextEdit value={a.tech} onSave={v=>fbUpd(`${base}/artists/${a.id}`,{tech:v})} cls="text-[11px] text-violet-200 w-full leading-relaxed"/>
+            :<div className="mono text-[11px] text-violet-200 leading-relaxed whitespace-pre-line">{a.tech}</div>}
+        </div>)}
+    </div>
+  );
+}
+function ArtistSheet({a,meta,onClose,onSave,onDelete}){
+  const [f,setF]=useState({});
+  useEffect(()=>{if(a)setF({name:'',day:'',floor:'',setStart:'',setEnd:'',soundcheck:'',contactName:'',contactPhone:'',notes:'',rider:'',tech:'',...a});},[a]);
+  if(!a)return null;
+  const set=(k,v)=>setF(p=>({...p,[k]:v}));
+  const save=()=>{
+    const {id,_new,...rest}=f;
+    if(!rest.name?.trim())return;
+    onSave(a._new?'a'+uid():a.id,rest);
+  };
+  return(
+    <Sheet open={!!a} onClose={onClose} title={a._new?'Neuer Artist':'Artist bearbeiten'}
+      onDelete={a._new?null:()=>confirm(`"${a.name}" löschen?`)&&onDelete(a.id)}>
+      <div className="space-y-3">
+        <Field label="Name" value={f.name} onChange={v=>set('name',v)} placeholder="Artist"/>
+        <div className="grid grid-cols-2 gap-3">
+          <label className="block"><div className="text-zinc-500 text-[10px] mono uppercase tracking-wider mb-1">Tag</div>
+            <select value={f.day} onChange={e=>set('day',e.target.value)}
+              className="w-full bg-zinc-900 border border-zinc-700 text-zinc-100 mono text-sm px-3 py-2.5 rounded-lg focus:border-amber-500">
+              {(meta.days||[]).map(d=><option key={d} value={d}>{d}</option>)}</select></label>
+          <label className="block"><div className="text-zinc-500 text-[10px] mono uppercase tracking-wider mb-1">Floor</div>
+            <select value={f.floor} onChange={e=>set('floor',e.target.value)}
+              className="w-full bg-zinc-900 border border-zinc-700 text-zinc-100 mono text-sm px-3 py-2.5 rounded-lg focus:border-amber-500">
+              {(meta.floors||[]).map(d=><option key={d} value={d}>{d}</option>)}</select></label>
+        </div>
+        <div className="grid grid-cols-3 gap-3">
+          <Field label="Set von" value={f.setStart} onChange={v=>set('setStart',v)} placeholder="22:00"/>
+          <Field label="Set bis"  value={f.setEnd}   onChange={v=>set('setEnd',v)}   placeholder="00:00"/>
+          <Field label="Soundcheck" value={f.soundcheck} onChange={v=>set('soundcheck',v)} placeholder="—"/>
+        </div>
+        <Field label="Kontakt Name"  value={f.contactName}  onChange={v=>set('contactName',v)}  placeholder="Tourmanager"/>
+        <Field label="Kontakt Telefon" value={f.contactPhone} onChange={v=>set('contactPhone',v)} placeholder="+49 …"/>
+        <label className="block"><div className="text-zinc-500 text-[10px] mono uppercase tracking-wider mb-1">Notizen</div>
+          <textarea value={f.notes??''} onChange={e=>set('notes',e.target.value)} rows={2} placeholder="Besonderheiten, Hinweise…"
+            className="w-full bg-zinc-900 border border-zinc-700 text-zinc-100 mono text-sm px-3 py-2.5 rounded-lg focus:border-amber-500 placeholder-zinc-700 resize-none"/></label>
+        <label className="block"><div className="text-amber-500/80 text-[10px] mono uppercase tracking-wider mb-1">🍾 Rider — eine Position pro Zeile</div>
+          <textarea value={f.rider??''} onChange={e=>set('rider',e.target.value)} rows={6} placeholder={"4x Wasser still\n2x Red Bull\n1x Handtuch"}
+            className="w-full bg-zinc-900 border border-zinc-700 text-zinc-100 mono text-xs px-3 py-2.5 rounded-lg focus:border-amber-500 placeholder-zinc-700 resize-none leading-relaxed"/>
+          <div className="mono text-[9px] text-zinc-600 mt-1">Mengen als „4x …" schreiben — fließt so in die Einkaufsliste.</div></label>
+        <label className="block"><div className="text-violet-400/80 text-[10px] mono uppercase tracking-wider mb-1">🎛 Techrider</div>
+          <textarea value={f.tech??''} onChange={e=>set('tech',e.target.value)} rows={3} placeholder="A&H 96 · 4x CDJ 3000"
+            className="w-full bg-zinc-900 border border-zinc-700 text-zinc-100 mono text-xs px-3 py-2.5 rounded-lg focus:border-violet-500 placeholder-zinc-700 resize-none leading-relaxed"/></label>
+        <button onClick={save} className="w-full bg-amber-500 text-black bebas text-xl py-3 rounded-xl tracking-widest active:scale-[.98]">SPEICHERN</button>
+      </div>
+    </Sheet>
+  );
+}
+
+/* ══ PICKUPS ═════════════════════════════════════════════════════════ */
+function Pickups({ev,base,editable,role}){
+  const meta=ev.meta||{};const days=meta.days||[];
+  const [day,setDay]=useState('ALL');
+  const [edit,setEdit]=useState(null);
+  const dIdx=d=>{const i=days.indexOf(d);return i<0?999:i;};
+  const all=obj2arr(ev.pickups).sort((a,b)=>
+    (dIdx(a.day)-dIdx(b.day))||(toMins(a.time)-toMins(b.time)));
+  const list=day==='ALL'?all:all.filter(p=>p.day===day);
+  const open=all.filter(p=>!p.done).length;
+  const upd=(id,patch)=>fbUpd(`${base}/pickups/${id}`,patch);
+  return(
+    <div className="pb-24 pt-4">
+      <div className="px-4 flex gap-1.5 mb-3 overflow-x-auto">
+        <button onClick={()=>setDay('ALL')} className={`flex-shrink-0 px-3 py-1.5 rounded-lg mono text-[11px] font-bold border ${day==='ALL'?'text-zinc-100 border-zinc-500 bg-zinc-800':'text-zinc-600 border-zinc-800 bg-zinc-900'}`}>Alle</button>
+        {days.map(d=><button key={d} onClick={()=>setDay(d)} className={`flex-shrink-0 px-3 py-1.5 rounded-lg mono text-[11px] font-bold border ${day===d?'text-amber-400 border-amber-500/40 bg-amber-500/10':'text-zinc-600 border-zinc-800 bg-zinc-900'}`}>{d}</button>)}
+      </div>
+      <div className="px-4">
+        <SectionLabel right={<span className={`mono text-[10px] px-2 py-0.5 rounded-full border ${open?'text-amber-400 border-amber-500/30 bg-amber-500/10':'text-emerald-400 border-emerald-500/30 bg-emerald-500/10'}`}>{open} offen</span>}>
+          {list.length} Transfers</SectionLabel>
+        <div className="space-y-2">
+          {list.length===0&&<Empty>Keine Transfers.</Empty>}
+          {list.map(p=>(
+            <div key={p.id} className={`rounded-xl border px-3.5 py-3 transition-all
+              ${p.done?'border-zinc-800/40 bg-zinc-900/25 opacity-45':'border-zinc-800 bg-zinc-900/60'}`}>
+              <div className="flex items-center gap-3">
+                <Check checked={!!p.done} onToggle={()=>upd(p.id,{done:!p.done,doneAt:!p.done?Date.now():null,doneBy:!p.done?role:null})}/>
+                <div className="flex-1 min-w-0">
+                  {editable
+                    ?<TextEdit value={p.label} onSave={v=>upd(p.id,{label:v})} cls={`text-sm font-bold ${p.done?'text-zinc-600 line-through':'text-zinc-100'}`}/>
+                    :<div className={`mono text-sm font-bold ${p.done?'text-zinc-600 line-through':'text-zinc-100'}`}>{p.label}</div>}
+                  <div className="mono text-[10px] text-zinc-500 mt-0.5">
+                    {p.day} · {p.from||'Hotel'} → {p.to||'Venue'}
+                    {p.done&&p.doneAt&&<span className="text-emerald-500/70"> · ✓ {new Date(p.doneAt).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})}</span>}
+                  </div>
+                </div>
+                <TimeEdit value={p.time} onSave={v=>upd(p.id,{time:v})}/>
+                {editable&&<button onClick={()=>setEdit(p)} className="text-zinc-600 text-xs px-1 active:text-amber-400">✎</button>}
+              </div>
+            </div>
+          ))}
+        </div>
+        {editable&&<div className="pt-3"><AddBtn onClick={()=>setEdit({_new:true,day:day==='ALL'?days[0]:day,time:'',label:'',from:'Hotel',to:'Venue'})}>Pickup hinzufügen</AddBtn></div>}
+      </div>
+      <PickupSheet p={edit} meta={meta} onClose={()=>setEdit(null)}
+        onSave={(id,d)=>{fbSet(`${base}/pickups/${id}`,d);setEdit(null);}}
+        onDelete={id=>{fbDel(`${base}/pickups/${id}`);setEdit(null);}}/>
+    </div>
+  );
+}
+function PickupSheet({p,meta,onClose,onSave,onDelete}){
+  const [f,setF]=useState({});
+  useEffect(()=>{if(p)setF({label:'',time:'',day:'',from:'Hotel',to:'Venue',done:false,notes:'',...p});},[p]);
+  if(!p)return null;
+  const set=(k,v)=>setF(x=>({...x,[k]:v}));
+  return(
+    <Sheet open={!!p} onClose={onClose} title={p._new?'Neuer Pickup':'Pickup bearbeiten'}
+      onDelete={p._new?null:()=>confirm('Pickup löschen?')&&onDelete(p.id)}>
+      <div className="space-y-3">
+        <Field label="Bezeichnung" value={f.label} onChange={v=>set('label',v)} placeholder="z. B. Artist Pickup"/>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Uhrzeit" value={f.time} onChange={v=>set('time',v)} placeholder="21:15"/>
+          <label className="block"><div className="text-zinc-500 text-[10px] mono uppercase tracking-wider mb-1">Tag</div>
+            <select value={f.day} onChange={e=>set('day',e.target.value)}
+              className="w-full bg-zinc-900 border border-zinc-700 text-zinc-100 mono text-sm px-3 py-2.5 rounded-lg focus:border-amber-500">
+              {(meta.days||[]).map(d=><option key={d} value={d}>{d}</option>)}</select></label>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Von" value={f.from} onChange={v=>set('from',v)} placeholder="Hotel"/>
+          <Field label="Nach" value={f.to}  onChange={v=>set('to',v)}   placeholder="Venue"/>
+        </div>
+        <button onClick={()=>{const{id,_new,...r}=f;if(r.label?.trim())onSave(p._new?'p'+uid():p.id,r);}}
+          className="w-full bg-amber-500 text-black bebas text-xl py-3 rounded-xl tracking-widest active:scale-[.98]">SPEICHERN</button>
+      </div>
+    </Sheet>
+  );
+}
+
+/* ══ GUESTS ══════════════════════════════════════════════════════════ */
+function Guests({ev,base}){
+  const [which,setWhich]=useState('guestlist');
+  const [q,setQ]=useState('');const [add,setAdd]=useState(false);
+  const [nName,setNName]=useState('');const [nPlus,setNPlus]=useState('0');const [nNote,setNNote]=useState('');
+  const path=`${base}/${which}`;
+  const raw=obj2arr(ev[which]);
+  const rows=raw.filter(g=>(g.name||'').toLowerCase().includes(q.toLowerCase()))
+    .sort((a,b)=>(a.checkedIn===b.checkedIn)?(a.name||'').localeCompare(b.name||''):(a.checkedIn?1:-1));
+  const inN=raw.filter(g=>g.checkedIn).length;
+  const heads=raw.reduce((s,g)=>s+1+(+g.plus||0),0);
+  const headsIn=raw.filter(g=>g.checkedIn).reduce((s,g)=>s+1+(+g.plus||0),0);
+  const create=()=>{if(!nName.trim())return;
+    fbPush(path,{name:nName.trim(),plus:+nPlus||0,note:nNote.trim(),checkedIn:false,createdAt:Date.now()});
+    setNName('');setNPlus('0');setNNote('');};
+  return(
+    <div className="flex flex-col flex-1 min-h-0">
+      <div className="flex border-b border-zinc-800 flex-shrink-0">
+        {[{id:'guestlist',l:'GÄSTELISTE'},{id:'friendslist',l:'FRIENDSLIST'}].map(t=>(
+          <button key={t.id} onClick={()=>{setWhich(t.id);setQ('');}}
+            className={`flex-1 py-2.5 bebas text-sm tracking-wider border-b-2 transition-all
+              ${which===t.id?'text-emerald-400 border-emerald-500':'text-zinc-600 border-transparent'}`}>{t.l}</button>))}
+      </div>
+      <div className="flex items-center gap-4 px-4 py-3 border-b border-zinc-800 flex-shrink-0">
+        <div><div className="bebas text-2xl text-emerald-400 leading-none">{inN}<span className="text-zinc-700">/{raw.length}</span></div>
+          <div className="mono text-[9px] text-zinc-600 uppercase tracking-wider mt-0.5">Einträge</div></div>
+        <div><div className="bebas text-2xl text-zinc-300 leading-none">{headsIn}<span className="text-zinc-700">/{heads}</span></div>
+          <div className="mono text-[9px] text-zinc-600 uppercase tracking-wider mt-0.5">Köpfe inkl. +X</div></div>
+        <div className="flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden ml-1">
+          <div className="h-full bg-emerald-500 rounded-full transition-all" style={{width:(raw.length?inN/raw.length*100:0)+'%'}}/></div>
+      </div>
+      <div className="px-4 pt-3 pb-2 flex gap-2 flex-shrink-0">
+        <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Name suchen…"
+          className="flex-1 bg-zinc-900 border border-zinc-800 text-zinc-100 mono text-sm px-3 py-2.5 rounded-xl focus:border-emerald-500 placeholder-zinc-700 transition-colors"/>
+        <button onClick={()=>setAdd(!add)}
+          className={`px-4 rounded-xl mono text-lg font-bold active:scale-95 transition-all ${add?'bg-zinc-700 text-zinc-300':'bg-emerald-500 text-black'}`}>{add?'✕':'+'}</button>
+      </div>
+      {add&&(
+        <div className="px-4 pb-3 flex-shrink-0 slide">
+          <div className="bg-zinc-900 border border-emerald-500/30 rounded-xl p-3 space-y-2">
+            <input autoFocus value={nName} onChange={e=>setNName(e.target.value)} onKeyDown={e=>e.key==='Enter'&&create()}
+              placeholder="Name" className="w-full bg-zinc-800 border border-zinc-700 text-white mono text-sm px-3 py-2 rounded-lg focus:border-emerald-500 placeholder-zinc-700"/>
+            <div className="flex gap-2">
+              <div className="flex items-center gap-1.5 bg-zinc-800 border border-zinc-700 rounded-lg px-2.5">
+                <span className="mono text-xs text-zinc-500">+</span>
+                <input value={nPlus} onChange={e=>setNPlus(e.target.value)} type="number" min="0" max="20"
+                  className="w-10 text-white mono text-sm py-2 text-center"/></div>
+              <input value={nNote} onChange={e=>setNNote(e.target.value)} onKeyDown={e=>e.key==='Enter'&&create()}
+                placeholder="Notiz (optional)" className="flex-1 bg-zinc-800 border border-zinc-700 text-white mono text-sm px-3 py-2 rounded-lg focus:border-emerald-500 placeholder-zinc-700"/>
+              <button onClick={create} className="bg-emerald-500 text-black mono text-xs font-bold px-4 rounded-lg active:scale-95">OK</button>
+            </div>
+          </div>
+        </div>
+      )}
+      <div className="flex-1 overflow-y-auto px-4 safe-bot">
+        {rows.length===0&&<Empty>{q?'Niemanden gefunden.':'Noch keine Einträge.\nMit + hinzufügen.'}</Empty>}
+        {rows.map(g=><GuestRow key={g.id} g={g} path={path}/>)}
+      </div>
+    </div>
+  );
+}
+function GuestRow({g,path}){
+  const [ed,setEd]=useState(false);
+  const [n,setN]=useState(g.name);const [p,setP]=useState(String(g.plus||0));const [nt,setNt]=useState(g.note||'');
+  useEffect(()=>{setN(g.name);setP(String(g.plus||0));setNt(g.note||'');},[g.name,g.plus,g.note]);
+  const save=()=>{fbUpd(`${path}/${g.id}`,{name:n,plus:+p||0,note:nt});setEd(false);};
+  return(
+    <div className={`flex items-center gap-3 py-2.5 border-b border-zinc-800/60 transition-all ${g.checkedIn?'opacity-45':''}`}>
+      <Check checked={!!g.checkedIn} onToggle={()=>fbUpd(`${path}/${g.id}`,{checkedIn:!g.checkedIn,inAt:!g.checkedIn?Date.now():null})} size={32}/>
+      <div className="flex-1 min-w-0">
+        {ed?(
+          <div className="space-y-1.5">
+            <div className="flex gap-1.5">
+              <input value={n} onChange={e=>setN(e.target.value)} onKeyDown={e=>e.key==='Enter'&&save()}
+                className="flex-1 bg-zinc-800 border border-amber-500 text-white mono text-sm px-2 py-1.5 rounded"/>
+              <input value={p} onChange={e=>setP(e.target.value)} type="number" min="0"
+                className="w-12 bg-zinc-800 border border-zinc-700 text-white mono text-sm px-1 py-1.5 rounded text-center"/>
+            </div>
+            <div className="flex gap-1.5">
+              <input value={nt} onChange={e=>setNt(e.target.value)} onKeyDown={e=>e.key==='Enter'&&save()} placeholder="Notiz"
+                className="flex-1 bg-zinc-800 border border-zinc-700 text-white mono text-xs px-2 py-1.5 rounded placeholder-zinc-700"/>
+              <button onClick={save} className="bg-emerald-500 text-black mono text-xs font-bold px-3 rounded">✓</button>
+            </div>
+          </div>
+        ):(
+          <>
+            <div className="flex items-center gap-1.5">
+              <span className={`mono text-sm font-bold truncate ${g.checkedIn?'text-zinc-500 line-through':'text-zinc-100'}`}>{g.name}</span>
+              {g.plus>0&&<span className="mono text-[11px] text-amber-500/80 flex-shrink-0">+{g.plus}</span>}
+            </div>
+            {g.note&&<div className="mono text-[10px] text-zinc-600 truncate">{g.note}</div>}
+            {g.checkedIn&&g.inAt&&<div className="mono text-[9px] text-emerald-600">✓ {new Date(g.inAt).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})}</div>}
+          </>
+        )}
+      </div>
+      <button onClick={()=>setEd(!ed)} className="text-zinc-700 text-xs px-1.5 py-1 active:text-amber-400">✎</button>
+      <button onClick={()=>confirm(`"${g.name}" löschen?`)&&fbDel(`${path}/${g.id}`)} className="text-zinc-700 text-xs px-1.5 py-1 active:text-red-400">✕</button>
+    </div>
+  );
+}
+
+/* ══ FAHRER ══════════════════════════════════════════════════════════ */
+function FahrerPanel({ev,base,driverId}){
+  const meta=ev.meta||{};
+  const me=(ev.drivers||{})[driverId]||{};
+  const [name,setName]=useState(me.name||localStorage.getItem('uo-drivername')||'');
+  const [on,setOn]=useState(!!me.active);
+  const [err,setErr]=useState('');
+  const watch=useRef(null);
+  useEffect(()=>{if(me.name&&!name)setName(me.name);},[me.name]);
+  useEffect(()=>()=>{if(watch.current!=null)navigator.geolocation.clearWatch(watch.current);},[]);
+  const start=()=>{
+    if(!navigator.geolocation){setErr('Gerät unterstützt kein GPS');return;}
+    setErr('');
+    watch.current=navigator.geolocation.watchPosition(
+      pos=>fbSet(`${base}/drivers/${driverId}`,{name:name.trim()||'Fahrer',active:true,
+        lat:pos.coords.latitude,lng:pos.coords.longitude,acc:Math.round(pos.coords.accuracy||0),updatedAt:Date.now()}),
+      e=>setErr(e.code===1?'Standortfreigabe verweigert — in den Browser-Einstellungen erlauben':'Standort nicht verfügbar'),
+      {enableHighAccuracy:true,maximumAge:8000,timeout:20000});
+    setOn(true);
+  };
+  const stop=()=>{
+    if(watch.current!=null){navigator.geolocation.clearWatch(watch.current);watch.current=null;}
+    fbUpd(`${base}/drivers/${driverId}`,{active:false,updatedAt:Date.now()});setOn(false);
+  };
+  const days=meta.days||[];
+  const dIdx=d=>{const i=days.indexOf(d);return i<0?999:i;};
+  const list=obj2arr(ev.pickups).sort((a,b)=>
+    (dIdx(a.day)-dIdx(b.day))||(toMins(a.time)-toMins(b.time)));
+  const next=list.find(p=>!p.done);
+  return(
+    <div className="pb-24 pt-4 px-4">
+      <div className={`rounded-xl border px-4 py-4 mb-4 transition-all ${on?'border-blue-500/45 bg-blue-950/30':'border-zinc-800 bg-zinc-900/60'}`}>
+        <div className="flex items-center gap-3">
+          <div className="flex-1 min-w-0">
+            <div className={`mono text-sm font-bold ${on?'text-blue-300':'text-zinc-300'}`}>{on?'📍 Standort wird geteilt':'Standort teilen'}</div>
+            <div className="mono text-[11px] text-zinc-500 mt-0.5">{on?'Leitung sieht dich live auf der Karte':'Leitung sieht deinen Standort aktuell nicht'}</div>
+          </div>
+          <button onClick={on?stop:start} className={`relative w-12 h-7 rounded-full transition-colors flex-shrink-0 ${on?'bg-blue-500':'bg-zinc-700'}`}>
+            <span className={`absolute top-1 w-5 h-5 bg-white rounded-full shadow transition-all ${on?'left-6':'left-1'}`}/></button>
+        </div>
+        <input value={name} placeholder="Dein Name (für die Leitung)"
+          onChange={e=>{setName(e.target.value);localStorage.setItem('uo-drivername',e.target.value);}}
+          onBlur={()=>fbUpd(`${base}/drivers/${driverId}`,{name:name.trim()||'Fahrer'})}
+          className="w-full mt-3 bg-zinc-900 border border-zinc-700 text-zinc-100 mono text-xs px-3 py-2 rounded-lg focus:border-blue-500 placeholder-zinc-700"/>
+        {err&&<div className="mono text-[11px] text-red-400 mt-2">{err}</div>}
+        {on&&me.lat!=null&&<div className="mono text-[10px] text-blue-400/70 mt-2">{me.lat.toFixed(5)}, {me.lng.toFixed(5)} · ±{me.acc}m · {ago(me.updatedAt)}</div>}
+      </div>
+      {next&&(
+        <div className="rounded-xl border border-amber-500/40 bg-amber-500/[.07] px-4 py-3 mb-4">
+          <div className="mono text-[9px] text-amber-500/80 uppercase tracking-[.18em]">Nächster Transfer</div>
+          <div className="flex items-baseline gap-2.5 mt-1">
+            <span className="bebas text-3xl text-amber-400 leading-none">{next.time}</span>
+            <span className="mono text-sm text-zinc-100 font-bold truncate">{next.label}</span></div>
+          <div className="mono text-[11px] text-zinc-500 mt-0.5">{next.day} · {next.from} → {next.to}</div>
+        </div>
+      )}
+      <SectionLabel right={<span className="mono text-[10px] text-zinc-600">{list.filter(p=>!p.done).length} offen</span>}>Transfers</SectionLabel>
+      <div className="space-y-2 mb-6">
+        {list.length===0&&<Empty>Keine Transfers eingetragen.</Empty>}
+        {list.map(p=>(
+          <div key={p.id} className={`rounded-xl border px-3.5 py-3 flex items-center gap-3 transition-all
+            ${p.done?'border-zinc-800/40 bg-zinc-900/25 opacity-45':'border-zinc-800 bg-zinc-900/60'}`}>
+            <Check checked={!!p.done} onToggle={()=>fbUpd(`${base}/pickups/${p.id}`,{done:!p.done,doneAt:!p.done?Date.now():null,doneBy:'fahrer'})}/>
+            <div className="flex-1 min-w-0">
+              <div className={`mono text-sm font-bold ${p.done?'text-zinc-600 line-through':'text-zinc-100'}`}>{p.label}</div>
+              <div className="mono text-[10px] text-zinc-500">{p.day} · {p.from} → {p.to}</div>
+            </div>
+            <TimeEdit value={p.time} onSave={v=>fbUpd(`${base}/pickups/${p.id}`,{time:v})}/>
+          </div>
+        ))}
+      </div>
+      {/* An- und Abreisen sind auch Fahrten */}
+      {(()=>{
+        const tr=obj2arr(ev.travel).filter(t=>/Royal|Fahrer|Taxi/i.test(t.mode||''))
+          .sort((a,b)=>(a.day||'').localeCompare(b.day||'')||toMins(a.time)-toMins(b.time));
+        if(!tr.length)return null;
+        return(
+          <div className="mb-6">
+            <SectionLabel right={<span className="mono text-[10px] text-zinc-600">{tr.filter(t=>!t.done).length} offen</span>}>
+              An- &amp; Abreisen mit Fahrdienst</SectionLabel>
+            <div className="space-y-2">
+              {tr.map(t=>(
+                <div key={t.id} className={`rounded-xl border px-3.5 py-3 flex items-start gap-3 transition-all
+                  ${t.done?'border-zinc-800/40 bg-zinc-900/25 opacity-45':'border-blue-500/25 bg-blue-950/15'}`}>
+                  <Check checked={!!t.done} onToggle={()=>fbUpd(`${base}/travel/${t.id}`,{done:!t.done,doneAt:!t.done?Date.now():null})}/>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className={`mono text-sm font-bold ${t.done?'text-zinc-600 line-through':'text-zinc-100'}`}>{t.artist}</span>
+                      <span className="mono text-[9px] px-1.5 py-0.5 rounded border border-blue-500/40 bg-blue-500/10 text-blue-300">
+                        {t.dir==='in'?'↓ Ankunft':'↑ Abfahrt'}</span>
+                      <span className="mono text-[10px] text-zinc-600">{t.day}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 mt-1 mono text-[11px]">
+                      <span className="text-zinc-400 truncate">{t.from}</span>
+                      <span className="text-amber-500">→</span>
+                      <span className="text-zinc-100 truncate">{t.to}</span>
+                    </div>
+                    {t.notes&&<div className="mono text-[10px] text-zinc-500 mt-0.5">{t.notes}</div>}
+                    {t.phone&&<a href={`tel:${(t.phone||'').replace(/\s/g,'')}`}
+                      className="mono text-[10px] text-blue-300 mt-1 inline-block">📞 {t.contact||'Kontakt'} · {t.phone}</a>}
+                  </div>
+                  <TimeEdit value={t.time} onSave={v=>fbUpd(`${base}/travel/${t.id}`,{time:v})}/>
+                </div>))}
+            </div>
+          </div>);
+      })()}
+
+      <SectionLabel>Locations</SectionLabel>
+      <div className="space-y-2">
+        {[{i:'🏨',t:'HOTEL',n:meta.hotelName,a:meta.hotelAddr},{i:'📍',t:'VENUE',n:meta.venueName,a:meta.venueAddr}].map(x=>(
+          <a key={x.t} href={mapsUrl(x.a)} target="_blank" rel="noopener"
+            className="block bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 active:bg-zinc-800">
+            <div className="mono text-[10px] text-zinc-500">{x.i} {x.t}</div>
+            <div className="mono text-sm font-bold text-zinc-100 mt-0.5">{x.n}</div>
+            <div className="mono text-[11px] text-blue-400 mt-0.5">{x.a} ↗</div></a>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ══ EINKAUFSLISTE ═══════════════════════════════════════════════════ */
+const parseRider=txt=>(txt||'').split('\n').flatMap(l=>l.split('·')).map(s=>s.trim()).filter(Boolean)
+  .map(line=>{const m=line.match(/^(\d+)\s*[x×]\s*(.+)$/i);
+    return m?{qty:parseInt(m[1]),name:m[2].trim()}:{qty:1,name:line};});
+const CATS=[
+  {id:'alk',  l:'Alkohol',        ic:'🥃', re:/vodka|wodka|sekt|champagn|prosecco|bier|corona|gin\b|whisky|tequila|don julio|moët|moet|belvedere|absolut|grey goose|sparkling wine|roku|suntory|premium vodka/i},
+  {id:'drink',l:'Getränke',       ic:'🥤', re:/wasser|water|mate|red bull|energy|cola|fanta|powerade|juice|saft|säfte|limonade|lemonade|ginger|capri|volvic|charitea|coconut|vitamin|shot|zitronensaft|lime juice|soft drink|fiji/i},
+  {id:'tab',  l:'Tabak',          ic:'🚬', re:/zigaretten|marlboro|camel|pall mall|vogue|r1 blue|papes|ocb|weed/i},
+  {id:'food', l:'Essen & Snacks', ic:'🍓', re:/früchte|frucht|banane|mango|snack|protein|haribo|sweets|nüsse|kaugummi|orbit|erdbeer|trauben|blaubeer|limette|zitrone|bars/i},
+  {id:'mat',  l:'Material',       ic:'🧺', re:/handtuch|handtücher|ventilator|fans|power strip|mic\b|xlr|drink ticket|glas/i},
+  {id:'rest', l:'Sonstiges',      ic:'📦', re:/.*/},
+];
+const catOf=n=>(CATS.find(c=>c.re.test(n))||CATS[CATS.length-1]).id;
+const normKey=n=>n.toLowerCase().replace(/\(.*?\)/g,'').replace(/[^a-zäöüß0-9 ]/g,'').replace(/\s+/g,' ').trim();
+
+function Shopping({ev,base}){
+  const [extraTxt,setExtraTxt]=useState('');
+  const [hideDone,setHideDone]=useState(false);
+  const bought=ev.bought||{};
+  const artists=obj2arr(ev.artists);
+  const agg=useMemo(()=>{
+    const map={};
+    artists.forEach(a=>parseRider(a.rider).forEach(it=>{
+      const k=normKey(it.name);if(!k)return;
+      if(!map[k])map[k]={key:k,name:it.name,qty:0,who:[],cat:catOf(it.name)};
+      map[k].qty+=it.qty;
+      if(it.name.length>map[k].name.length)map[k].name=it.name;
+      if(!map[k].who.includes(a.name))map[k].who.push(a.name);
+    }));
+    return Object.values(map).sort((a,b)=>b.qty-a.qty||a.name.localeCompare(b.name));
+  },[JSON.stringify(artists.map(a=>[a.name,a.rider]))]);
+  const extras=obj2arr(ev.shopping);
+  const total=agg.length+extras.length;
+  const doneN=agg.filter(i=>bought[i.key]).length+extras.filter(e=>e.done).length;
+  const byCat={};agg.forEach(i=>(byCat[i.cat]=byCat[i.cat]||[]).push(i));
+  const addExtra=()=>{if(!extraTxt.trim())return;
+    const p=parseRider(extraTxt)[0];
+    fbPush(`${base}/shopping`,{name:p.name,qty:p.qty,done:false,createdAt:Date.now()});setExtraTxt('');};
+
+  return(
+    <div className="pb-24 pt-4">
+      <div className="px-4">
+        <div className="bg-zinc-900/70 border border-zinc-800 rounded-xl px-4 py-3 mb-4 flex items-center gap-4">
+          <div><div className="bebas text-3xl text-emerald-400 leading-none">{doneN}<span className="text-zinc-700">/{total}</span></div>
+            <div className="mono text-[9px] text-zinc-600 uppercase tracking-wider mt-0.5">besorgt</div></div>
+          <div className="flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+            <div className="h-full bg-emerald-500 rounded-full transition-all" style={{width:(total?doneN/total*100:0)+'%'}}/></div>
+          <button onClick={()=>setHideDone(!hideDone)}
+            className={`mono text-[10px] px-2.5 py-1.5 rounded-lg border transition-all ${hideDone?'text-amber-400 border-amber-500/40 bg-amber-500/10':'text-zinc-500 border-zinc-700'}`}>
+            {hideDone?'alle':'offen'}</button>
+        </div>
+
+        {total===0&&<Empty>Keine Rider-Positionen gefunden.{'\n'}Trage Rider bei den Artists ein — sie erscheinen hier automatisch.</Empty>}
+
+        {CATS.filter(c=>byCat[c.id]?.length).map(c=>{
+          const items=byCat[c.id].filter(i=>!hideDone||!bought[i.key]);
+          if(!items.length)return null;
+          return(
+            <div key={c.id} className="mb-5">
+              <SectionLabel right={<span className="mono text-[10px] text-zinc-700">{byCat[c.id].length}</span>}>{c.ic} {c.l}</SectionLabel>
+              <div className="space-y-1.5">
+                {items.map(i=>(
+                  <button key={i.key} onClick={()=>fbSet(`${base}/bought/${i.key}`,!bought[i.key])}
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border text-left transition-all active:scale-[.99]
+                      ${bought[i.key]?'border-zinc-800/40 bg-zinc-900/25 opacity-45':'border-zinc-800 bg-zinc-900/55'}`}>
+                    <span className={`w-6 h-6 rounded-md border flex items-center justify-center flex-shrink-0
+                      ${bought[i.key]?'bg-emerald-500 border-emerald-500':'border-zinc-600 bg-zinc-800'}`}>
+                      {bought[i.key]&&<span className="text-black text-[11px] font-black">✓</span>}</span>
+                    <span className="bebas text-xl text-amber-400 w-9 flex-shrink-0 leading-none">{i.qty}×</span>
+                    <span className="flex-1 min-w-0">
+                      <span className={`block mono text-[12px] font-semibold ${bought[i.key]?'text-zinc-600 line-through':'text-zinc-100'}`}>{i.name}</span>
+                      <span className="block mono text-[9px] text-zinc-600 truncate">{i.who.join(', ')}</span></span>
+                  </button>))}
+              </div>
+            </div>);
+        })}
+
+        <div className="mt-2">
+          <SectionLabel>➕ Zusätzlich besorgen</SectionLabel>
+          <div className="space-y-1.5 mb-2">
+            {extras.filter(e=>!hideDone||!e.done).map(e=>(
+              <div key={e.id} className={`flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-all
+                ${e.done?'border-zinc-800/40 bg-zinc-900/25 opacity-45':'border-zinc-800 bg-zinc-900/55'}`}>
+                <Check checked={!!e.done} onToggle={()=>fbUpd(`${base}/shopping/${e.id}`,{done:!e.done})} size={24}/>
+                <span className="bebas text-xl text-amber-400 w-9 flex-shrink-0 leading-none">{e.qty}×</span>
+                <TextEdit value={e.name} onSave={v=>fbUpd(`${base}/shopping/${e.id}`,{name:v})}
+                  cls={`flex-1 text-[12px] font-semibold ${e.done?'text-zinc-600 line-through':'text-zinc-100'}`}/>
+                <button onClick={()=>fbDel(`${base}/shopping/${e.id}`)} className="text-zinc-700 text-xs px-1 active:text-red-400">✕</button>
+              </div>))}
+          </div>
+          <div className="flex gap-2">
+            <input value={extraTxt} onChange={e=>setExtraTxt(e.target.value)} onKeyDown={e=>e.key==='Enter'&&addExtra()}
+              placeholder="z. B. 20x Becher"
+              className="flex-1 bg-zinc-900 border border-zinc-800 text-zinc-100 mono text-sm px-3 py-2.5 rounded-xl focus:border-amber-500 placeholder-zinc-700"/>
+            <button onClick={addExtra} className="bg-amber-500 text-black mono text-lg font-bold px-4 rounded-xl active:scale-95">+</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ══ RASTER · alle Floors parallel, Zeitachse senkrecht ══════════════ */
+const PX_PER_MIN=1.15;                      // Höhe einer Minute
+function Grid({ev,base}){
+  const meta=ev.meta||{};const days=meta.days||[];const floors=meta.floors||[];
+  const [day,setDay]=useState(()=>days.find(x=>isLiveDay(x,Date.now()))||days[0]);
+  const [sel,setSel]=useState(null);
+  const [now,setNow]=useState(Date.now());
+  const scroller=useRef(null);const didScroll=useRef(false);
+  useEffect(()=>{const t=setInterval(()=>setNow(Date.now()),30000);return()=>clearInterval(t);},[]);
+  useEffect(()=>{if(!days.includes(day))setDay(days.find(x=>isLiveDay(x,Date.now()))||days[0]);},[days.join('|')]);
+  const st=ev.status||{};
+
+  const sets=obj2arr(ev.artists).filter(a=>a.day===day&&a.setStart&&a.setEnd);
+  const empty=sets.length===0;
+
+  // Zeitfenster bestimmen (volle Stunden)
+  let lo=0,hi=60;
+  if(!empty){
+    lo=Math.min(...sets.map(s=>toMins(s.setStart)));
+    hi=Math.max(...sets.map(s=>{const e=toMins(s.setEnd);return e<=toMins(s.setStart)?e+1440:e;}));
+    lo=Math.floor(lo/60)*60; hi=Math.ceil(hi/60)*60;
+  }
+  const H=(hi-lo)*PX_PER_MIN;
+  const hours=[];for(let m=lo;m<=hi;m+=60)hours.push(m);
+  const label=m=>String(Math.floor((m%1440)/60)%24).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
+
+  const nowM=nowMins(now);
+  const isToday=isLiveDay(day,now);
+  const nowY=(nowM-lo)*PX_PER_MIN;
+  const nowVisible=!empty&&isToday&&nowM>=lo&&nowM<=hi;
+  const liveDay=days.find(x=>isLiveDay(x,now));   // welcher Tag läuft gerade?
+
+  useEffect(()=>{                                    // beim Öffnen zur aktuellen Zeit springen
+    if(nowVisible&&scroller.current&&!didScroll.current){
+      didScroll.current=true;
+      scroller.current.scrollTop=Math.max(0,nowY-160);
+    }
+  },[nowVisible,nowY]);
+
+  if(empty)return(
+    <div className="pt-0">
+      <DaySwitch days={days} day={day} setDay={setDay} liveDay={liveDay}/>
+      <Empty>Kein Line-up für {day}.</Empty></div>);
+
+  return(
+    <div className="flex flex-col" style={{height:'calc(100dvh - 190px)'}}>
+      <DaySwitch days={days} day={day} setDay={setDay} liveDay={liveDay}/>
+      {/* Kopfzeile mit Floornamen */}
+      <div className="flex px-4 gap-1.5 pb-1.5 flex-shrink-0">
+        <div className="w-11 flex-shrink-0"/>
+        {floors.map(f=>{const c=facc(floors,f);
+          return <div key={f} className={`flex-1 min-w-0 text-center mono text-[9px] font-bold py-1 rounded-md border ${c.t} ${c.b} ${c.bg}`}>
+            <span className="block truncate px-1">{f.replace(/^Floor\s*/,'')}</span></div>;})}
+      </div>
+      {/* Raster */}
+      <div ref={scroller} className="flex-1 overflow-y-auto px-4 pb-6">
+        <div className="relative flex gap-1.5" style={{height:H}}>
+          {/* Zeitachse */}
+          <div className="w-11 flex-shrink-0 relative">
+            {hours.map(m=>(
+              <div key={m} className="absolute left-0 mono text-[9px] text-zinc-600"
+                style={{top:(m-lo)*PX_PER_MIN-5}}>{label(m)}</div>))}
+          </div>
+          {/* Stundenlinien */}
+          {hours.map(m=>(
+            <div key={'l'+m} className="absolute left-11 right-0 border-t border-zinc-800/70 pointer-events-none"
+              style={{top:(m-lo)*PX_PER_MIN}}/>))}
+          {/* Floorspalten */}
+          {floors.map(f=>{
+            const col=sets.filter(a=>a.floor===f);
+            const c=facc(floors,f);
+            return(
+              <div key={f} className="flex-1 min-w-0 relative">
+                {col.map(a=>{
+                  const s0=toMins(a.setStart);
+                  let s1=toMins(a.setEnd); if(s1<=s0)s1+=1440;
+                  const top=(s0-lo)*PX_PER_MIN, h=Math.max(24,(s1-s0)*PX_PER_MIN);
+                  const s=st[a.id]||{};
+                  const live=isToday&&nowM>=s0&&nowM<s1;
+                  const done=!!s.set_end;
+                  return(
+                    <button key={a.id} onClick={()=>setSel(a)}
+                      className={`absolute left-0 right-0 rounded-lg border px-1.5 py-1 text-left overflow-hidden transition-all active:scale-[.98]
+                        ${live?'border-emerald-400 bg-emerald-500/20':done?'border-zinc-800 bg-zinc-900/40 opacity-45':`${c.b} ${c.bg}`}`}
+                      style={{top,height:h-3,
+                        boxShadow:live?'0 0 14px rgba(16,185,129,.35)':'none',
+                        zIndex:live?20:5}}>
+                      <span className={`block mono text-[10px] font-bold leading-tight truncate ${live?'text-emerald-200':done?'text-zinc-600':'text-zinc-100'}`}>{a.name}</span>
+                      {h>38&&<span className={`block mono text-[8px] leading-tight ${live?'text-emerald-300/80':'text-zinc-500'}`}>{a.setStart}–{a.setEnd}</span>}
+                      {h>56&&a.soundcheck&&<span className="block mono text-[8px] text-violet-300/80 leading-tight">SC {a.soundcheck}</span>}
+                      {h>56&&live&&<span className="block mono text-[8px] text-emerald-400 font-bold leading-tight mt-0.5">▶ LÄUFT</span>}
+                    </button>);
+                })}
+              </div>);
+          })}
+          {/* Leuchtender Jetzt-Strich über alle Floors */}
+          {nowVisible&&(
+            <div className="absolute left-0 right-0 pointer-events-none" style={{top:nowY,zIndex:40}}>
+              <div className="relative flex items-center">
+                <span className="mono text-[9px] font-bold text-red-400 bg-zinc-950 pr-1 -ml-0.5"
+                  style={{textShadow:'0 0 8px rgba(239,68,68,.9)'}}>{clockNow()}</span>
+                <span className="flex-1 h-px bg-red-500" style={{boxShadow:'0 0 8px 1px rgba(239,68,68,.85)'}}/>
+                <span className="w-1.5 h-1.5 rounded-full bg-red-500 -ml-0.5" style={{boxShadow:'0 0 8px 2px rgba(239,68,68,.9)'}}/>
+              </div>
+            </div>)}
+        </div>
+      </div>
+      <SetSheet a={sel} floors={floors} onClose={()=>setSel(null)}/>
+    </div>
+  );
+}
+function DaySwitch({days,day,setDay,liveDay}){
+  return(
+    <div className="px-4 pt-4 pb-2.5 flex gap-2 flex-shrink-0">
+      {days.map(x=>(
+        <button key={x} onClick={()=>setDay(x)}
+          className={`relative flex-1 py-2.5 rounded-lg mono text-sm font-bold border transition-all
+            ${day===x?'bg-amber-500/10 border-amber-500/40 text-amber-400':'bg-zinc-900 border-zinc-800 text-zinc-500'}`}>
+          {x}
+          {liveDay===x&&<span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-red-500"
+            style={{boxShadow:'0 0 6px 1px rgba(239,68,68,.9)'}}/>}
+        </button>))}
+    </div>);
+}
+/* gemeinsame Set-Detailansicht für Raster und Ablauf */
+function SetSheet({a,floors,onClose}){
+  if(!a)return null;
+  const c=facc(floors,a.floor);
+  return(
+    <Sheet open={!!a} onClose={onClose} title={a.name||''}>
+      <div className="space-y-4">
+        <div className="flex gap-2 flex-wrap">
+          <span className="mono text-xs bg-zinc-900 border border-zinc-700 px-2.5 py-1.5 rounded-lg text-amber-400">{a.setStart} – {a.setEnd}</span>
+          <span className={`mono text-xs px-2.5 py-1.5 rounded-lg border ${c.t} ${c.b} ${c.bg}`}>{a.floor}</span>
+          {a.soundcheck&&<span className="mono text-xs bg-violet-500/10 border border-violet-500/30 text-violet-300 px-2.5 py-1.5 rounded-lg">SC {a.soundcheck}</span>}
+        </div>
+        {a.notes&&<div className="mono text-xs text-zinc-400 leading-relaxed bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2.5">{a.notes}</div>}
+        {a.contactPhone&&(
+          <a href={`tel:${a.contactPhone}`} className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2.5 mono text-xs text-blue-300">
+            📞 {a.contactName} · {a.contactPhone}</a>)}
+        {a.tech&&<div><div className="mono text-[10px] text-violet-400/80 uppercase tracking-wider mb-1.5">🎛 Techrider</div>
+          <div className="mono text-xs text-violet-200 leading-relaxed bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2.5 whitespace-pre-line">{a.tech}</div></div>}
+        {a.rider&&<div><div className="mono text-[10px] text-amber-500/80 uppercase tracking-wider mb-1.5">🍾 Rider</div>
+          <div className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2.5 space-y-1">
+            {parseRider(a.rider).map((it,i)=>(
+              <div key={i} className="flex gap-2 mono text-xs text-zinc-300">
+                {it.qty>1&&<span className="text-amber-500 font-bold w-7">{it.qty}×</span>}<span>{it.name}</span></div>))}</div></div>}
+      </div>
+    </Sheet>
+  );
+}
+
+/* ══ ABLAUF · durchlaufender Timetable ═══════════════════════════════ */
+function Runsheet({ev,base}){
+  const meta=ev.meta||{};const days=meta.days||[];const floors=meta.floors||[];
+  const [day,setDay]=useState(()=>days.find(x=>isLiveDay(x,Date.now()))||days[0]);
+  const [show,setShow]=useState({set:true,pick:true,trav:true});
+  const [sel,setSel]=useState(null);
+  const [now,setNow]=useState(Date.now());
+  useEffect(()=>{const t=setInterval(()=>setNow(Date.now()),30000);return()=>clearInterval(t);},[]);
+  useEffect(()=>{if(!days.includes(day))setDay(days.find(x=>isLiveDay(x,Date.now()))||days[0]);},[days.join('|')]);
+  const st=ev.status||{};
+
+  const items=[];
+  if(show.set)obj2arr(ev.artists).filter(a=>a.day===day).forEach(a=>{
+    items.push({k:'set',id:a.id,t:a.setStart,end:a.setEnd,title:a.name,sub:a.floor,a});
+    if(a.soundcheck)items.push({k:'sc',id:a.id+'-sc',t:a.soundcheck,title:`Soundcheck · ${a.name}`,sub:a.floor,a});
+  });
+  if(show.pick)obj2arr(ev.pickups).filter(p=>p.day===day).forEach(p=>
+    items.push({k:'pick',id:p.id,t:p.time,title:p.label,sub:`${p.from} → ${p.to}`,done:p.done}));
+  if(show.trav)obj2arr(ev.travel).forEach(tr=>{
+    const dd=(day.match(/(\d{2}\.\d{2})/)||[])[1];
+    if(dd&&tr.day===dd)items.push({k:tr.dir==='in'?'in':'out',id:tr.id,t:tr.time,
+      title:`${tr.dir==='in'?'Ankunft':'Abfahrt'} · ${tr.artist}`,sub:`${tr.from} → ${tr.to}`,done:tr.done});});
+  items.sort((a,b)=>toMins(a.t)-toMins(b.t));
+
+  const nowM=nowMins(now);
+  const isToday=isLiveDay(day,now);
+  const liveDay=days.find(x=>isLiveDay(x,now));
+  const nextIdx=items.findIndex(i=>toMins(i.t)>=nowM);
+  const KIND={
+    set: {ic:'🎧',c:'#fbbf24',l:'SET'},
+    sc:  {ic:'🔊',c:'#a78bfa',l:'SOUNDCHECK'},
+    pick:{ic:'🚐',c:'#60a5fa',l:'PICKUP'},
+    in:  {ic:'↓', c:'#34d399',l:'ANKUNFT'},
+    out: {ic:'↑', c:'#f472b6',l:'ABFAHRT'},
+  };
+  const F=[{id:'set',l:'Sets'},{id:'pick',l:'Pickups'},{id:'trav',l:'An/Abreise'}];
+
+  return(
+    <div className="pb-24 pt-4">
+      <div className="-mt-4 mb-0.5"><DaySwitch days={days} day={day} setDay={setDay} liveDay={liveDay}/></div>
+      <div className="px-4 flex gap-1.5 mb-4">
+        {F.map(f=><button key={f.id} onClick={()=>setShow(s=>({...s,[f.id]:!s[f.id]}))}
+          className={`flex-1 py-1.5 rounded-lg mono text-[10px] font-bold border transition-all
+            ${show[f.id]?'text-zinc-100 border-zinc-500 bg-zinc-800':'text-zinc-600 border-zinc-800 bg-zinc-900 line-through'}`}>{f.l}</button>)}
+      </div>
+      <div className="px-4">
+        {items.length===0&&<Empty>Nichts geplant für {day}.</Empty>}
+        <div className="relative">
+          <div className="absolute left-[52px] top-2 bottom-2 w-px bg-zinc-800"/>
+          {items.map((i,idx)=>{
+            const K=KIND[i.k];
+            const live=i.k==='set'&&isToday&&toMins(i.t)<=nowM&&toMins(i.end)>nowM;
+            const past=isToday&&toMins(i.t)<nowM;
+            const s=i.a?(st[i.a.id]||{}):{};
+            return(
+              <React.Fragment key={i.id+idx}>
+                {isToday&&idx===nextIdx&&(
+                  <div className="flex items-center gap-2 my-2 pl-1">
+                    <span className="mono text-[9px] text-red-400 font-bold w-[46px] text-right">{clockNow()}</span>
+                    <span className="w-2 h-2 rounded-full bg-red-500 flex-shrink-0" style={{boxShadow:'0 0 8px #ef4444'}}/>
+                    <span className="flex-1 h-px bg-red-500/50"/>
+                    <span className="mono text-[9px] text-red-400 font-bold">JETZT</span>
+                  </div>)}
+                <button onClick={()=>i.a&&setSel(i.a)}
+                  className={`w-full flex gap-3 items-start py-1.5 text-left ${past&&!live?'opacity-40':''}`}>
+                  <span className="w-[46px] flex-shrink-0 text-right pt-0.5">
+                    <span className={`mono text-xs font-bold ${live?'text-emerald-400':'text-zinc-300'}`}>{i.t||'—'}</span>
+                    {i.end&&<span className="block mono text-[9px] text-zinc-600">{i.end}</span>}</span>
+                  <span className="relative flex-shrink-0 mt-1" style={{width:12}}>
+                    <span className="block w-2.5 h-2.5 rounded-full border-2 border-zinc-950"
+                      style={{background:live?'#10b981':K.c,marginLeft:-1,boxShadow:live?'0 0 10px #10b981':'none'}}/></span>
+                  <span className={`flex-1 min-w-0 rounded-lg border px-3 py-2 transition-all
+                    ${live?'border-emerald-500/50 bg-emerald-950/25':i.done?'border-zinc-800/40 bg-zinc-900/20':'border-zinc-800 bg-zinc-900/50'}`}>
+                    <span className="flex items-center gap-1.5 flex-wrap">
+                      <span className="mono text-[8px] px-1.5 py-0.5 rounded" style={{color:K.c,background:K.c+'1f'}}>{K.ic} {K.l}</span>
+                      {live&&<span className="mono text-[8px] px-1.5 py-0.5 rounded bg-emerald-500 text-black font-bold">LÄUFT</span>}
+                      {i.done&&<span className="mono text-[8px] text-emerald-500">✓</span>}
+                    </span>
+                    <span className={`block mono text-[13px] font-bold mt-1 truncate ${i.done?'text-zinc-600 line-through':'text-zinc-100'}`}>{i.title}</span>
+                    <span className="block mono text-[10px] text-zinc-500 truncate">{i.sub}</span>
+                    {i.k==='set'&&i.a?.tech&&<span className="block mono text-[9px] text-violet-400/70 truncate mt-0.5">🎛 {i.a.tech}</span>}
+                    {i.k==='set'&&s.im_club&&<span className="block mono text-[9px] text-emerald-500/80 mt-0.5">✓ im Club</span>}
+                  </span>
+                </button>
+              </React.Fragment>);
+          })}
+        </div>
+      </div>
+      <Sheet open={!!sel} onClose={()=>setSel(null)} title={sel?.name||''}>
+        {sel&&(
+          <div className="space-y-4">
+            <div className="flex gap-2 flex-wrap">
+              <span className="mono text-xs bg-zinc-900 border border-zinc-700 px-2.5 py-1.5 rounded-lg text-amber-400">{sel.setStart} – {sel.setEnd}</span>
+              <span className={`mono text-xs px-2.5 py-1.5 rounded-lg border ${facc(floors,sel.floor).t} ${facc(floors,sel.floor).b} ${facc(floors,sel.floor).bg}`}>{sel.floor}</span>
+              {sel.soundcheck&&<span className="mono text-xs bg-violet-500/10 border border-violet-500/30 text-violet-300 px-2.5 py-1.5 rounded-lg">SC {sel.soundcheck}</span>}
+            </div>
+            {sel.notes&&<div className="mono text-xs text-zinc-400 leading-relaxed bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2.5">{sel.notes}</div>}
+            {sel.contactPhone&&(
+              <a href={`tel:${sel.contactPhone}`} className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2.5 mono text-xs text-blue-300">
+                📞 {sel.contactName} · {sel.contactPhone}</a>)}
+            {sel.tech&&<div><div className="mono text-[10px] text-violet-400/80 uppercase tracking-wider mb-1.5">🎛 Techrider</div>
+              <div className="mono text-xs text-violet-200 leading-relaxed bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2.5 whitespace-pre-line">{sel.tech}</div></div>}
+            {sel.rider&&<div><div className="mono text-[10px] text-amber-500/80 uppercase tracking-wider mb-1.5">🍾 Rider</div>
+              <div className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2.5 space-y-1">
+                {parseRider(sel.rider).map((it,i)=>(
+                  <div key={i} className="flex gap-2 mono text-xs text-zinc-300">
+                    {it.qty>1&&<span className="text-amber-500 font-bold w-7">{it.qty}×</span>}<span>{it.name}</span></div>))}</div></div>}
+          </div>)}
+      </Sheet>
+    </div>
+  );
+}
+
+/* ══ TRAVEL · AN- & ABREISE ══════════════════════════════════════════ */
+const MODES=['Royal Transfer','Eigener Fahrer','Zu Fuß','Taxi','Eigene Anreise (Auto)','Eigene Abreise (Auto)','Flug','Bahn','offen'];
+const modeStyle=m=>{
+  if(/Royal|Fahrer|Taxi/i.test(m||''))return{t:'text-blue-300',b:'border-blue-500/40',bg:'bg-blue-500/10',i:'🚐'};
+  if(/Flug/i.test(m||''))            return{t:'text-violet-300',b:'border-violet-500/40',bg:'bg-violet-500/10',i:'✈️'};
+  if(/Bahn|Fuß/i.test(m||''))        return{t:'text-emerald-300',b:'border-emerald-500/40',bg:'bg-emerald-500/10',i:'🚶'};
+  if(/Eigene/i.test(m||''))          return{t:'text-zinc-400',b:'border-zinc-600',bg:'bg-zinc-800/60',i:'🚗'};
+  return{t:'text-amber-300',b:'border-amber-500/40',bg:'bg-amber-500/10',i:'❓'};
+};
+function Travel({ev,base,editable}){
+  const [dir,setDir]=useState('in');
+  const [day,setDay]=useState('ALL');
+  const [edit,setEdit]=useState(null);
+  const all=obj2arr(ev.travel);
+  const rows=all.filter(t=>t.dir===dir)
+    .filter(t=>day==='ALL'||t.day===day)
+    .sort((a,b)=>(a.day||'').localeCompare(b.day||'')||toMins(a.time)-toMins(b.time)||(a.artist||'').localeCompare(b.artist||''));
+  const dayChips=[...new Set(all.filter(t=>t.dir===dir).map(t=>t.day))].sort();
+  const needsDriver=all.filter(t=>t.dir===dir&&/Royal|Fahrer|Taxi/i.test(t.mode||'')).length;
+  const openN=rows.filter(t=>!t.done).length;
+  const upd=(id,p)=>fbUpd(`${base}/travel/${id}`,p);
+  useEffect(()=>setDay('ALL'),[dir]);
+
+  return(
+    <div className="pb-24 pt-4">
+      <div className="px-4 flex gap-2 mb-3">
+        {[{id:'in',l:'ANREISE',ic:'↓'},{id:'out',l:'ABREISE',ic:'↑'}].map(d=>(
+          <button key={d.id} onClick={()=>setDir(d.id)}
+            className={`flex-1 py-2.5 rounded-lg mono text-xs font-bold border transition-all active:scale-[.98]
+              ${dir===d.id?'bg-amber-500/10 border-amber-500/40 text-amber-400':'bg-zinc-900 border-zinc-800 text-zinc-500'}`}>
+            {d.ic} {d.l}</button>))}
+      </div>
+      {dayChips.length>1&&(
+        <div className="px-4 flex gap-1.5 mb-3 overflow-x-auto">
+          <button onClick={()=>setDay('ALL')}
+            className={`flex-shrink-0 px-3 py-1.5 rounded-lg mono text-[11px] font-bold border ${day==='ALL'?'text-zinc-100 border-zinc-500 bg-zinc-800':'text-zinc-600 border-zinc-800 bg-zinc-900'}`}>Alle</button>
+          {dayChips.map(d=>(
+            <button key={d} onClick={()=>setDay(d)}
+              className={`flex-shrink-0 px-3 py-1.5 rounded-lg mono text-[11px] font-bold border ${day===d?'text-amber-400 border-amber-500/40 bg-amber-500/10':'text-zinc-600 border-zinc-800 bg-zinc-900'}`}>{d}</button>))}
+        </div>
+      )}
+      <div className="px-4">
+        <SectionLabel right={<span className="mono text-[10px] text-zinc-600">{openN} offen · 🚐 {needsDriver} mit Fahrer</span>}>
+          {rows.length} {dir==='in'?'Ankünfte':'Abfahrten'}</SectionLabel>
+        <div className="space-y-2">
+          {rows.length===0&&(
+            <Empty>Noch keine {dir==='in'?'Anreisen':'Abreisen'} eingetragen.
+              {editable&&'\nMit + unten hinzufügen.'}</Empty>)}
+          {rows.map(t=>{
+            const ms=modeStyle(t.mode);
+            const drive=/Royal|Fahrer|Taxi/i.test(t.mode||'');
+            return(
+              <div key={t.id} className={`rounded-xl border transition-all
+                ${t.done?'border-zinc-800/40 bg-zinc-900/25 opacity-45':drive?'border-blue-500/25 bg-blue-950/15':'border-zinc-800 bg-zinc-900/55'}`}>
+                <div className="flex gap-3 px-3.5 py-3">
+                  <Check checked={!!t.done} onToggle={()=>upd(t.id,{done:!t.done,doneAt:!t.done?Date.now():null})}/>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className={`mono text-sm font-bold truncate ${t.done?'text-zinc-600 line-through':'text-zinc-100'}`}>{t.artist}</span>
+                      <span className={`mono text-[9px] px-1.5 py-0.5 rounded border ${ms.t} ${ms.b} ${ms.bg}`}>{ms.i} {t.mode}</span>
+                      <span className="mono text-[10px] text-zinc-600">{t.day}</span>
+                      {editable&&<button onClick={()=>setEdit(t)} className="ml-auto text-zinc-600 text-xs px-1 active:text-amber-400">✎</button>}
+                    </div>
+                    {/* Route */}
+                    <div className="flex items-center gap-1.5 mt-2 mono text-[11px]">
+                      <span className="text-zinc-400 truncate">{t.from||'—'}</span>
+                      <span className="text-amber-500 flex-shrink-0">→</span>
+                      <span className="text-zinc-100 font-semibold truncate">{t.to||'—'}</span>
+                      <span className="flex-shrink-0 ml-auto">
+                        {editable
+                          ?<TimeEdit value={t.time} onSave={v=>upd(t.id,{time:v})}/>
+                          :<span className="mono text-sm font-bold text-amber-400">{t.time||'—'}</span>}
+                      </span>
+                    </div>
+                    {/* Wer bringt ihn */}
+                    <div className="mt-1.5 mono text-[10px] leading-snug">
+                      <span className="text-zinc-600">Zuständig: </span>
+                      <span className={drive?'text-blue-300':'text-zinc-500'}>
+                        {t.driver||(drive?'⚠️ noch kein Fahrer zugeteilt':'reist selbstständig')}</span>
+                    </div>
+                    {t.notes&&<div className="mono text-[10px] text-zinc-500 mt-1">{t.notes}</div>}
+                    {t.phone&&(
+                      <a href={`tel:${(t.phone||'').replace(/\s/g,'')}`}
+                        className="flex items-center gap-1.5 mt-1.5 mono text-[10px] text-zinc-500 active:text-blue-300">
+                        📞 {t.contact||'Kontakt'} · {t.phone}</a>)}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        {editable&&(
+          <div className="pt-3 space-y-2">
+            <AddBtn onClick={()=>setEdit({_new:true,dir,day:dayChips[0]||'',artist:'',contact:'',phone:'',
+              mode:dir==='in'?'Zu Fuß':'Zu Fuß',from:dir==='in'?'Dortmund HBF':'Hotel',to:dir==='in'?'Hotel':'Dortmund HBF',
+              time:'',driver:'',notes:''})}>
+              {dir==='in'?'Anreise':'Abreise'} hinzufügen</AddBtn>
+            {all.length===0&&(
+              <button onClick={()=>fbSet(`${base}/travel`,seedTravel())}
+                className="w-full border border-dashed border-zinc-700 text-zinc-500 mono text-[11px] py-2.5 rounded-xl active:bg-zinc-900">
+                Dortmund-Reisedaten laden (26 Einträge)</button>)}
+          </div>
+        )}
+      </div>
+      <TravelSheet t={edit} onClose={()=>setEdit(null)}
+        onSave={(id,d)=>{fbSet(`${base}/travel/${id}`,d);setEdit(null);}}
+        onDelete={id=>{fbDel(`${base}/travel/${id}`);setEdit(null);}}/>
+    </div>
+  );
+}
+function TravelSheet({t,onClose,onSave,onDelete}){
+  const [f,setF]=useState({});
+  useEffect(()=>{if(t)setF({artist:'',contact:'',phone:'',mode:'',from:'',to:'',time:'',day:'',driver:'',notes:'',done:false,...t});},[t]);
+  if(!t)return null;
+  const set=(k,v)=>setF(p=>({...p,[k]:v}));
+  const isIn=f.dir==='in';
+  return(
+    <Sheet open={!!t} onClose={onClose} title={t._new?(isIn?'Neue Anreise':'Neue Abreise'):'Reise bearbeiten'}
+      onDelete={t._new?null:()=>confirm(`Eintrag "${t.artist}" löschen?`)&&onDelete(t.id)}>
+      <div className="space-y-3">
+        <Field label="Artist / Person" value={f.artist} onChange={v=>set('artist',v)} placeholder="Name"/>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Datum" value={f.day} onChange={v=>set('day',v)} placeholder="18.07"/>
+          <Field label={isIn?'Ankunftszeit':'Abfahrtszeit'} value={f.time} onChange={v=>set('time',v)} placeholder="11:50"/>
+        </div>
+        <label className="block"><div className="text-zinc-500 text-[10px] mono uppercase tracking-wider mb-1">Transportart</div>
+          <select value={f.mode} onChange={e=>set('mode',e.target.value)}
+            className="w-full bg-zinc-900 border border-zinc-700 text-zinc-100 mono text-sm px-3 py-2.5 rounded-lg focus:border-amber-500">
+            <option value="">— wählen —</option>
+            {MODES.map(m=><option key={m} value={m}>{m}</option>)}</select></label>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label={isIn?'Kommt an in':'Startet bei'} value={f.from} onChange={v=>set('from',v)}
+            placeholder={isIn?'Dortmund Flughafen':'Hotel'}/>
+          <Field label={isIn?'Wird gebracht nach':'Fährt nach'} value={f.to} onChange={v=>set('to',v)}
+            placeholder={isIn?'Hotel':'Düsseldorf Flughafen'}/>
+        </div>
+        <Field label="Wer bringt ihn / Zuständig" value={f.driver} onChange={v=>set('driver',v)}
+          placeholder="z. B. Royal Transfer · Mitat Dağ · +49 151 …"/>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Kontaktperson" value={f.contact} onChange={v=>set('contact',v)} placeholder="Tourmanager"/>
+          <Field label="Telefon" value={f.phone} onChange={v=>set('phone',v)} placeholder="+49 …"/>
+        </div>
+        <label className="block"><div className="text-zinc-500 text-[10px] mono uppercase tracking-wider mb-1">Notizen</div>
+          <textarea value={f.notes??''} onChange={e=>set('notes',e.target.value)} rows={2} placeholder="Flugnummer, Zug, Besonderheiten…"
+            className="w-full bg-zinc-900 border border-zinc-700 text-zinc-100 mono text-sm px-3 py-2.5 rounded-lg focus:border-amber-500 placeholder-zinc-700 resize-none"/></label>
+        <button onClick={()=>{const{id,_new,...r}=f;if(r.artist?.trim())onSave(t._new?(f.dir==='in'?'i':'o')+uid():t.id,r);}}
+          className="w-full bg-amber-500 text-black bebas text-xl py-3 rounded-xl tracking-widest active:scale-[.98]">SPEICHERN</button>
+      </div>
+    </Sheet>
+  );
+}
+
+/* ══ KONTAKTE · als Kontaktkarte (.vcf) speicherbar ══════════════════ */
+const telClean=p=>String(p||'').replace(/[^\d+]/g,'');
+const vcard=(c,evName)=>{
+  const parts=String(c.name||'').trim().split(/\s+/);
+  const last=parts.length>1?parts.pop():'';
+  const first=parts.join(' ');
+  return['BEGIN:VCARD','VERSION:3.0',
+    `N:${last};${first};;;`,
+    `FN:${(c.name||'').replace(/[,;]/g,' ')}`,
+    c.org?`ORG:${c.org.replace(/[,;]/g,' ')}`:'',
+    c.title?`TITLE:${c.title.replace(/[,;]/g,' ')}`:'',
+    c.phone?`TEL;TYPE=CELL:${telClean(c.phone)}`:'',
+    c.email?`EMAIL:${c.email}`:'',
+    `NOTE:${[evName,c.note].filter(Boolean).join(' · ').replace(/[,;]/g,' ')}`,
+    'END:VCARD'].filter(Boolean).join('\r\n');
+};
+const dlFile=(text,filename,mime)=>{
+  try{
+    const blob=new Blob([text],{type:mime});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url;a.download=filename;document.body.appendChild(a);a.click();
+    setTimeout(()=>{document.body.removeChild(a);URL.revokeObjectURL(url);},1500);
+  }catch(e){ console.error(e); alert('Download nicht möglich: '+(e.message||e)); }
+};
+
+function Contacts({ev,base,editable}){
+  const meta=ev.meta||{};
+  const [q,setQ]=useState('');
+  const [add,setAdd]=useState(false);
+  const [nf,setNf]=useState({name:'',phone:'',org:'',note:''});
+
+  const people=useMemo(()=>{
+    const out=[];const seen=new Map();
+    const push=c=>{
+      if(!c.name&&!c.phone)return;
+      const key=telClean(c.phone)||('n:'+(c.name||'').toLowerCase());
+      if(seen.has(key)){
+        const ex=seen.get(key);
+        if(c.title&&!ex.tags.includes(c.title))ex.tags.push(c.title);
+        return;
+      }
+      const rec={...c,tags:c.title?[c.title]:[]};
+      seen.set(key,rec);out.push(rec);
+    };
+    obj2arr(ev.artists).forEach(a=>{
+      if(a.contactPhone||a.contactName)
+        push({name:a.contactName||a.name,phone:a.contactPhone,org:meta.name||'',
+          title:`Artist ${a.name}`,note:`${a.day} · ${a.setStart}–${a.setEnd} · ${a.floor}`,kind:'artist'});
+    });
+    obj2arr(ev.travel).forEach(t=>{
+      if(t.phone||t.contact)
+        push({name:t.contact||t.artist,phone:t.phone,org:meta.name||'',
+          title:`${t.dir==='in'?'Anreise':'Abreise'} ${t.artist}`,
+          note:`${t.day} ${t.time||''} · ${t.from} → ${t.to}`,kind:'travel'});
+      if(t.driver&&/\+?\d[\d\s\/-]{6,}/.test(t.driver)){
+        const ph=(t.driver.match(/\+?\d[\d\s\/-]{6,}/)||[])[0];
+        const nm=t.driver.split('·').map(s=>s.trim()).filter(s=>!/\d{5}/.test(s)).join(' · ');
+        push({name:nm||'Fahrdienst',phone:ph,org:meta.name||'',title:'Fahrdienst',kind:'driver'});
+      }
+    });
+    obj2arr(ev.drivers).forEach(d=>{ if(d.name)push({name:d.name,phone:d.phone||'',org:meta.name||'',title:'Fahrer',kind:'driver'}); });
+    obj2arr(ev.contacts).forEach(c=>push({...c,kind:'custom',id:c.id}));
+    return out;
+  },[JSON.stringify([ev.artists,ev.travel,ev.contacts,ev.drivers,meta.name])]);
+
+  const rows=people.filter(c=>{
+    const s=(c.name+' '+(c.phone||'')+' '+c.tags.join(' ')).toLowerCase();
+    return s.includes(q.toLowerCase());
+  });
+  const KIND={artist:{ic:'🎧',c:'#fbbf24'},travel:{ic:'✈️',c:'#34d399'},driver:{ic:'🚐',c:'#60a5fa'},custom:{ic:'👤',c:'#a1a1aa'}};
+
+  const dlOne=c=>dlFile(vcard(c,meta.name),`${(c.name||'kontakt').replace(/[^\w\säöüÄÖÜß-]/g,'')}.vcf`,'text/vcard;charset=utf-8');
+  const dlAll=()=>dlFile(rows.map(c=>vcard(c,meta.name)).join('\r\n'),
+    `${(meta.name||'event').replace(/[^\w-]/g,'')}-kontakte.vcf`,'text/vcard;charset=utf-8');
+
+  return(
+    <div className="pb-24 pt-4 px-4">
+      <div className="flex gap-2 mb-3">
+        <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Name oder Nummer suchen…"
+          className="flex-1 bg-zinc-900 border border-zinc-800 text-zinc-100 mono text-sm px-3 py-2.5 rounded-xl focus:border-amber-500 placeholder-zinc-700"/>
+        {editable&&<button onClick={()=>setAdd(!add)}
+          className={`px-4 rounded-xl mono text-lg font-bold ${add?'bg-zinc-700 text-zinc-300':'bg-zinc-800 border border-zinc-700 text-zinc-300'}`}>{add?'✕':'+'}</button>}
+      </div>
+
+      {add&&editable&&(
+        <div className="bg-zinc-900 border border-amber-500/30 rounded-xl p-3 mb-3 space-y-2 slide">
+          <input autoFocus value={nf.name} onChange={e=>setNf(p=>({...p,name:e.target.value}))} placeholder="Name"
+            className="w-full bg-zinc-800 border border-zinc-700 text-white mono text-sm px-3 py-2 rounded-lg focus:border-amber-500 placeholder-zinc-600"/>
+          <input value={nf.phone} onChange={e=>setNf(p=>({...p,phone:e.target.value}))} placeholder="Telefon" inputMode="tel"
+            className="w-full bg-zinc-800 border border-zinc-700 text-white mono text-sm px-3 py-2 rounded-lg focus:border-amber-500 placeholder-zinc-600"/>
+          <div className="flex gap-2">
+            <input value={nf.note} onChange={e=>setNf(p=>({...p,note:e.target.value}))} placeholder="Funktion (z. B. Security)"
+              className="flex-1 bg-zinc-800 border border-zinc-700 text-white mono text-sm px-3 py-2 rounded-lg focus:border-amber-500 placeholder-zinc-600"/>
+            <button onClick={()=>{if(nf.name.trim()){fbPush(`${base}/contacts`,{name:nf.name.trim(),phone:nf.phone.trim(),title:nf.note.trim()||'Crew',note:''});setNf({name:'',phone:'',org:'',note:''});}}}
+              className="bg-amber-500 text-black mono text-xs font-bold px-4 rounded-lg">OK</button>
+          </div>
+        </div>)}
+
+      <SectionLabel right={
+        <button onClick={dlAll} disabled={!rows.length}
+          className={`mono text-[10px] px-2.5 py-1 rounded-lg border ${rows.length?'text-amber-400 border-amber-500/40 bg-amber-500/10 active:bg-amber-500/20':'text-zinc-700 border-zinc-800'}`}>
+          ⤓ alle {rows.length}</button>}>
+        Kontakte</SectionLabel>
+
+      <div className="space-y-2">
+        {rows.length===0&&<Empty>{q?'Nichts gefunden.':'Noch keine Kontakte hinterlegt.'}</Empty>}
+        {rows.map((c,i)=>{
+          const k=KIND[c.kind]||KIND.custom;
+          return(
+            <div key={i} className="rounded-xl border border-zinc-800 bg-zinc-900/60 px-3.5 py-3">
+              <div className="flex items-start gap-3">
+                <span className="w-9 h-9 rounded-full flex items-center justify-center text-sm flex-shrink-0"
+                  style={{background:k.c+'1f',border:'1px solid '+k.c+'55'}}>{k.ic}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="mono text-sm font-bold text-zinc-100 truncate">{c.name}</div>
+                  {c.phone&&<a href={`tel:${telClean(c.phone)}`} className="mono text-[12px] text-blue-300 active:text-blue-200">{c.phone}</a>}
+                  <div className="flex flex-wrap gap-1 mt-1.5">
+                    {c.tags.map((t,j)=>(
+                      <span key={j} className="mono text-[9px] px-1.5 py-0.5 rounded border truncate max-w-[150px]"
+                        style={{color:k.c,borderColor:k.c+'44',background:k.c+'14'}}>{t}</span>))}
+                  </div>
+                  {c.note&&<div className="mono text-[10px] text-zinc-600 mt-1 truncate">{c.note}</div>}
+                </div>
+                <div className="flex flex-col gap-1.5 flex-shrink-0">
+                  <button onClick={()=>dlOne(c)} title="Als Kontakt speichern"
+                    className="w-9 h-9 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-200 mono text-sm active:bg-zinc-700">⤓</button>
+                  {c.phone&&<a href={`tel:${telClean(c.phone)}`}
+                    className="w-9 h-9 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-200 text-sm flex items-center justify-center active:bg-zinc-700">📞</a>}
+                </div>
+              </div>
+              {c.kind==='custom'&&editable&&(
+                <button onClick={()=>fbDel(`${base}/contacts/${c.id}`)}
+                  className="mono text-[10px] text-zinc-700 mt-2 active:text-red-400">entfernen</button>)}
+            </div>);
+        })}
+      </div>
+      <div className="mono text-[10px] text-zinc-600 leading-relaxed mt-5 border-t border-zinc-900 pt-3">
+        ⤓ speichert eine Kontaktkarte (.vcf). Auf dem Handy öffnet sie sich direkt in den Kontakten — antippen und übernehmen.
+      </div>
+    </div>
+  );
+}
+
+/* ══ NOTES ═══════════════════════════════════════════════════════════ */
+function Notes({ev,base,editable}){
+  const [txt,setTxt]=useState('');
+  const list=obj2arr(ev.notes);
+  return(
+    <div className="px-4 pt-4 pb-24">
+      <SectionLabel>Wichtige Hinweise</SectionLabel>
+      <div className="space-y-2">
+        {list.length===0&&<Empty>Keine Notizen.</Empty>}
+        {list.map(n=>(
+          <div key={n.id} className="bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 flex gap-3 items-start">
+            <div className="flex-1 mono text-xs text-zinc-300 leading-relaxed">
+              {editable?<TextEdit value={n.text} onSave={v=>fbUpd(`${base}/notes/${n.id}`,{text:v})} cls="text-xs text-zinc-300 w-full"/>:n.text}</div>
+            {editable&&<button onClick={()=>fbDel(`${base}/notes/${n.id}`)} className="text-zinc-700 text-xs active:text-red-400 flex-shrink-0">✕</button>}
+          </div>
+        ))}
+      </div>
+      {editable&&(
+        <div className="flex gap-2 mt-3">
+          <input value={txt} onChange={e=>setTxt(e.target.value)}
+            onKeyDown={e=>{if(e.key==='Enter'&&txt.trim()){fbPush(`${base}/notes`,{text:txt.trim()});setTxt('');}}}
+            placeholder="Neue Notiz…"
+            className="flex-1 bg-zinc-900 border border-zinc-800 text-zinc-100 mono text-sm px-3 py-2.5 rounded-xl focus:border-amber-500 placeholder-zinc-700"/>
+          <button onClick={()=>{if(txt.trim()){fbPush(`${base}/notes`,{text:txt.trim()});setTxt('');}}}
+            className="bg-amber-500 text-black mono text-lg font-bold px-4 rounded-xl active:scale-95">+</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ══ EVENT SETTINGS (VERWALTEN) ══════════════════════════════════════ */
+function Settings({ev,base,eventId,onDeleted}){
+  const meta=ev.meta||{};
+  const set=(k,v)=>fbUpd(`${base}/meta`,{[k]:v});
+  const [nd,setNd]=useState('');const [nf,setNf]=useState('');
+  const days=meta.days||[];const floors=meta.floors||[];
+  const listEdit=(key,arr,idx,val)=>{const c=[...arr];if(val===null)c.splice(idx,1);else c[idx]=val;set(key,c);};
+  return(
+    <div className="px-4 pt-4 pb-24 space-y-6">
+      <div>
+        <SectionLabel>Eventdaten</SectionLabel>
+        <div className="space-y-3">
+          <Field label="Name"  value={meta.name} onChange={v=>set('name',v)} placeholder="UNREAL"/>
+          <Field label="Datum" value={meta.date} onChange={v=>set('date',v)} placeholder="17.–18.07.2026"/>
+          <Field label="Ort"   value={meta.city} onChange={v=>set('city',v)} placeholder="Dortmund · Junkyard"/>
+        </div>
+      </div>
+      <div>
+        <SectionLabel>Tage</SectionLabel>
+        <div className="space-y-2">
+          {days.map((d,i)=>(
+            <div key={i} className="flex gap-2 items-center bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2">
+              <span className="mono text-[10px] text-zinc-600 w-4">{i+1}</span>
+              <TextEdit value={d} onSave={v=>listEdit('days',days,i,v)} cls="flex-1 text-sm text-zinc-100"/>
+              <button onClick={()=>listEdit('days',days,i,null)} className="text-zinc-700 text-xs active:text-red-400">✕</button>
+            </div>))}
+          <div className="flex gap-2">
+            <input value={nd} onChange={e=>setNd(e.target.value)} placeholder="z. B. So 19.07"
+              onKeyDown={e=>{if(e.key==='Enter'&&nd.trim()){set('days',[...days,nd.trim()]);setNd('');}}}
+              className="flex-1 bg-zinc-900 border border-zinc-800 text-zinc-100 mono text-sm px-3 py-2.5 rounded-xl focus:border-amber-500 placeholder-zinc-700"/>
+            <button onClick={()=>{if(nd.trim()){set('days',[...days,nd.trim()]);setNd('');}}}
+              className="bg-zinc-800 border border-zinc-700 text-zinc-200 mono text-lg px-4 rounded-xl active:bg-zinc-700">+</button></div>
+        </div>
+      </div>
+      <div>
+        <SectionLabel>Floors / Bühnen</SectionLabel>
+        <div className="space-y-2">
+          {floors.map((f,i)=>{const c=PALETTE[i%PALETTE.length];
+            return(
+              <div key={i} className="flex gap-2 items-center bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2">
+                <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{background:c.hex}}/>
+                <TextEdit value={f} onSave={v=>listEdit('floors',floors,i,v)} cls="flex-1 text-sm text-zinc-100"/>
+                <button onClick={()=>listEdit('floors',floors,i,null)} className="text-zinc-700 text-xs active:text-red-400">✕</button>
+              </div>);})}
+          <div className="flex gap-2">
+            <input value={nf} onChange={e=>setNf(e.target.value)} placeholder="z. B. Floor IV Garden"
+              onKeyDown={e=>{if(e.key==='Enter'&&nf.trim()){set('floors',[...floors,nf.trim()]);setNf('');}}}
+              className="flex-1 bg-zinc-900 border border-zinc-800 text-zinc-100 mono text-sm px-3 py-2.5 rounded-xl focus:border-amber-500 placeholder-zinc-700"/>
+            <button onClick={()=>{if(nf.trim()){set('floors',[...floors,nf.trim()]);setNf('');}}}
+              className="bg-zinc-800 border border-zinc-700 text-zinc-200 mono text-lg px-4 rounded-xl active:bg-zinc-700">+</button></div>
+        </div>
+      </div>
+      <div>
+        <SectionLabel>Hotel</SectionLabel>
+        <div className="space-y-3">
+          <Field label="Name" value={meta.hotelName} onChange={v=>set('hotelName',v)}/>
+          <Field label="Adresse" value={meta.hotelAddr} onChange={v=>set('hotelAddr',v)}/>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Lat" value={meta.hotelLat} onChange={v=>set('hotelLat',parseFloat(v)||null)} placeholder="51.5085"/>
+            <Field label="Lng" value={meta.hotelLng} onChange={v=>set('hotelLng',parseFloat(v)||null)} placeholder="7.4685"/></div>
+        </div>
+      </div>
+      <div>
+        <SectionLabel>Venue</SectionLabel>
+        <div className="space-y-3">
+          <Field label="Name" value={meta.venueName} onChange={v=>set('venueName',v)}/>
+          <Field label="Adresse" value={meta.venueAddr} onChange={v=>set('venueAddr',v)}/>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Lat" value={meta.venueLat} onChange={v=>set('venueLat',parseFloat(v)||null)} placeholder="51.5145"/>
+            <Field label="Lng" value={meta.venueLng} onChange={v=>set('venueLng',parseFloat(v)||null)} placeholder="7.4610"/></div>
+          <div className="mono text-[10px] text-zinc-600 leading-relaxed">Koordinaten steuern die Karte. In Google Maps auf den Ort lange drücken → Zahlen kopieren.</div>
+        </div>
+      </div>
+      <div>
+        <SectionLabel>Dortmund-Stammdaten nachladen</SectionLabel>
+        <div className="space-y-2">
+          <button onClick={()=>{if(confirm('Rider & Techrider aller Dortmund-Artists einspielen? Bestehende Rider werden überschrieben.'))
+              Object.entries(SEED_RT).forEach(([id,[r,t]])=>fbUpd(`${base}/artists/${id}`,{rider:r,tech:t}));}}
+            className="w-full border border-dashed border-zinc-700 text-zinc-400 mono text-[11px] py-2.5 rounded-xl active:bg-zinc-900">
+            🍾 Rider &amp; Techrider laden (21 Artists)</button>
+          <button onClick={()=>{if(confirm('An-/Abreisedaten einspielen?'))fbSet(`${base}/travel`,seedTravel());}}
+            className="w-full border border-dashed border-zinc-700 text-zinc-400 mono text-[11px] py-2.5 rounded-xl active:bg-zinc-900">
+            ✈️ An-/Abreisedaten laden (26 Einträge)</button>
+          <div className="mono text-[9px] text-zinc-600 leading-relaxed">Nur nötig, wenn das Event vor diesen Funktionen angelegt wurde.</div>
+        </div>
+      </div>
+      <div className="pt-2 space-y-2">
+        <button onClick={()=>set('archived',!meta.archived)}
+          className="w-full border border-zinc-700 text-zinc-300 mono text-xs py-3 rounded-xl active:bg-zinc-900">
+          {meta.archived?'Aus Archiv holen':'Event archivieren'}</button>
+        <button onClick={()=>{if(confirm(`Event "${meta.name}" mit allen Daten unwiderruflich löschen?`)){fbDel(base);onDeleted();}}}
+          className="w-full border border-red-500/30 bg-red-500/10 text-red-400 mono text-xs py-3 rounded-xl active:bg-red-500/20">
+          Event löschen</button>
+      </div>
+    </div>
+  );
+}
+
+/* ══ EVENT SHELL ═════════════════════════════════════════════════════ */
+function EventShell({eventId,role,viewAs,setViewAs,onBack,onLogout,driverId}){
+  const base=`${ROOT}/events/${eventId}`;
+  const [ev,setEv]=useState(null);
+  const [tab,setTab]=useState('lineup');
+  useEffect(()=>fbOn(base,d=>setEv(d||{})),[eventId]);
+  useEffect(()=>{
+    if(viewAs==='einlass')setTab('guests');
+    else if(viewAs==='fahrer')setTab('fahrer');
+    else if(viewAs==='admin')setTab('settings');
+    else setTab('lineup');
+  },[viewAs]);
+  if(!ev)return <div className="min-h-screen flex items-center justify-center text-zinc-700 mono text-sm">Lade Event…</div>;
+  const meta=ev.meta||{};
+  const isSuper=role==='superadmin';
+  const eff=isSuper?viewAs:role;            // effective role
+  const editable=isSuper||eff==='leitung';
+  const drivers=obj2arr(ev.drivers);
+  const openP=obj2arr(ev.pickups).filter(p=>!p.done).length;
+  const liveD=drivers.filter(d=>d.active).length;
+
+  const openT=obj2arr(ev.travel).filter(t=>!t.done).length;
+  let tabs=[];
+  if(eff==='leitung'||eff==='admin'||eff==='events'){
+    tabs=[{id:'grid',label:'RASTER'},{id:'run',label:'ABLAUF'},{id:'lineup',label:'LINE-UP'},
+          {id:'pickups',label:'PICKUPS',badge:openP},{id:'travel',label:'AN/ABREISE',badge:openT},
+          {id:'shop',label:'EINKAUF'},{id:'map',label:'KARTE',badge:liveD},
+          {id:'guests',label:'GÄSTE'},{id:'contacts',label:'KONTAKTE'},{id:'notes',label:'NOTES'},
+          ...(editable?[{id:'settings',label:'EVENT'}]:[])];
+  } else if(eff==='einlass'){
+    tabs=[{id:'guests',label:'GÄSTE'},{id:'grid',label:'RASTER'}];
+  } else if(eff==='fahrer'){
+    tabs=[{id:'fahrer',label:'FAHRTEN',badge:openP+openT},
+          {id:'grid',label:'RASTER'},{id:'contacts',label:'KONTAKTE'}];
+  }
+  const valid=tabs.some(t=>t.id===tab)?tab:tabs[0]?.id;
+  const accent=ROLES[eff]?.color||'#fafafa';
+
+  return(
+    <div className="min-h-screen flex flex-col">
+      <TopBar title={meta.name||'Event'} sub={`${meta.date||''} · ${meta.city||''}`} onBack={onBack} accent={accent}
+        right={<div className="flex items-center gap-1.5">
+          <span className="mono text-[9px] px-2 py-1 rounded-md border" style={{color:accent,borderColor:accent+'55',background:accent+'14'}}>
+            {(ROLES[eff]?.label)||'ADMIN'}</span>
+          <button onClick={onLogout} className="text-zinc-500 mono text-[10px] px-2 py-1.5 border border-zinc-700 rounded-lg active:bg-zinc-800">Exit</button>
+        </div>}/>
+      {isSuper&&<SuperBar onSwitchRole={setViewAs} active={viewAs==='admin'?'admin':viewAs}/>}
+      <Tabs tabs={tabs} active={valid} onChange={setTab}/>
+      <div className={`flex-1 ${valid==='map'||valid==='grid'?'flex flex-col min-h-0':'overflow-y-auto'}`}>
+        {valid==='grid'    &&<Grid ev={ev} base={base}/>}
+        {valid==='run'     &&<Runsheet ev={ev} base={base}/>}
+        {valid==='shop'    &&<Shopping ev={ev} base={base}/>}
+        {valid==='lineup'  &&<Lineup ev={ev} base={base} editable={editable}/>}
+        {valid==='pickups' &&<Pickups ev={ev} base={base} editable={editable} role={eff}/>}
+        {valid==='travel'  &&<Travel ev={ev} base={base} editable={editable||eff==='fahrer'}/>}
+        {valid==='map'     &&<DriverPanel meta={meta} drivers={drivers}/>}
+        {valid==='guests'  &&<Guests ev={ev} base={base}/>}
+        {valid==='contacts'&&<Contacts ev={ev} base={base} editable={editable}/>}
+        {valid==='fahrer'  &&<FahrerPanel ev={ev} base={base} driverId={driverId}/>}
+        {valid==='notes'   &&<Notes ev={ev} base={base} editable={editable}/>}
+        {valid==='settings'&&<Settings ev={ev} base={base} eventId={eventId} onDeleted={onBack}/>}
+      </div>
+    </div>
+  );
+}
+
+/* ══ NEW EVENT ═══════════════════════════════════════════════════════ */
+function NewEvent({onCancel,onCreated}){
+  const [f,setF]=useState({name:'',date:'',city:'',days:'Fr,Sa',floors:'Floor I,Floor II',
+    hotelName:'',hotelAddr:'',venueName:'',venueAddr:''});
+  const set=(k,v)=>setF(p=>({...p,[k]:v}));
+  const create=async(withSeed)=>{
+    if(withSeed){
+      const id='ev'+uid();await fbSet(`${ROOT}/events/${id}`,buildSeed());onCreated(id);return;
+    }
+    if(!f.name.trim())return;
+    const id='ev'+uid();
+    await fbSet(`${ROOT}/events/${id}`,{meta:{
+      name:f.name.trim(),date:f.date.trim(),city:f.city.trim(),
+      days:f.days.split(',').map(s=>s.trim()).filter(Boolean),
+      floors:f.floors.split(',').map(s=>s.trim()).filter(Boolean),
+      hotelName:f.hotelName.trim(),hotelAddr:f.hotelAddr.trim(),hotelLat:null,hotelLng:null,
+      venueName:f.venueName.trim(),venueAddr:f.venueAddr.trim(),venueLat:null,venueLng:null,
+      archived:false,createdAt:Date.now()}});
+    onCreated(id);
+  };
+  return(
+    <div className="min-h-screen flex flex-col">
+      <TopBar title="NEUES EVENT" onBack={onCancel}/>
+      <div className="flex-1 overflow-y-auto px-4 pt-4 pb-8 safe-bot space-y-3">
+        <Field label="Eventname *" value={f.name} onChange={v=>set('name',v)} placeholder="UNREAL"/>
+        <Field label="Datum" value={f.date} onChange={v=>set('date',v)} placeholder="17.–18.07.2026"/>
+        <Field label="Ort"   value={f.city} onChange={v=>set('city',v)} placeholder="Dortmund · Junkyard"/>
+        <Field label="Tage (Komma-getrennt)"   value={f.days}   onChange={v=>set('days',v)}   placeholder="Fr 17.07, Sa 18.07"/>
+        <Field label="Floors (Komma-getrennt)" value={f.floors} onChange={v=>set('floors',v)} placeholder="Floor I Outdoor, Floor II Indoor"/>
+        <div className="pt-2"><SectionLabel>Hotel</SectionLabel>
+          <div className="space-y-3">
+            <Field label="Name" value={f.hotelName} onChange={v=>set('hotelName',v)} placeholder="Hotel"/>
+            <Field label="Adresse" value={f.hotelAddr} onChange={v=>set('hotelAddr',v)} placeholder="Straße, PLZ Ort"/></div></div>
+        <div className="pt-2"><SectionLabel>Venue</SectionLabel>
+          <div className="space-y-3">
+            <Field label="Name" value={f.venueName} onChange={v=>set('venueName',v)} placeholder="Club"/>
+            <Field label="Adresse" value={f.venueAddr} onChange={v=>set('venueAddr',v)} placeholder="Straße, PLZ Ort"/></div></div>
+        <button onClick={()=>create(false)} disabled={!f.name.trim()}
+          className={`w-full bebas text-xl py-3.5 rounded-xl tracking-widest mt-4 transition-all
+            ${f.name.trim()?'bg-amber-500 text-black active:scale-[.98]':'bg-zinc-800 text-zinc-600'}`}>
+          EVENT ANLEGEN</button>
+        <button onClick={()=>create(true)}
+          className="w-full border border-dashed border-zinc-700 text-zinc-500 mono text-xs py-3 rounded-xl active:bg-zinc-900">
+          Stattdessen Dortmund-Vorlage laden (komplettes Line-up)</button>
+        <div className="mono text-[10px] text-zinc-700 leading-relaxed pt-2">
+          Line-up, Pickups, Gästeliste und Notizen trägst du danach direkt im Event ein — alles jederzeit änderbar.</div>
+      </div>
+    </div>
+  );
+}
+
+/* ══ TEAM · Rollen vergeben ══════════════════════════════════════════ */
+function Team({me,onBack,events}){
+  const [users,setUsers]=useState({});
+  const [adding,setAdding]=useState(false);
+  const [f,setF]=useState({name:'',email:'',password:'',role:'leitung',evAll:true,evIds:{}});
+  const [busy,setBusy]=useState(false);
+  const [msg,setMsg]=useState(null);
+  useEffect(()=>fbOn(USERS,d=>setUsers(d||{})),[]);
+  const all=obj2arr(users).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+  const pending=all.filter(u=>u.pending);
+  const list=all.filter(u=>!u.pending);
+  const OPTS=[['superadmin','Superadmin'],['leitung','Leitung'],['einlass','Einlass'],['fahrer','Fahrer'],['','kein Zugang']];
+  const evList=obj2arr(events).map(e=>({id:e.id,name:e.meta?.name||'Ohne Titel',date:e.meta?.date||''}))
+    .filter(e=>!(events[e.id]?.meta?.archived));
+  const approve=(u,role)=>fbUpd(`${USERS}/${u.id}`,{role,pending:null,wish:null,active:true});
+  const set=(k,v)=>{setF(p=>({...p,[k]:v}));setMsg(null);};
+  const genPw=()=>set('password',Math.random().toString(36).slice(2,6)+'-'+Math.random().toString(36).slice(2,6));
+
+  const create=async()=>{
+    if(!f.name.trim()||!f.email.trim()){setMsg({t:'err',m:'Name und E-Mail ausfüllen.'});return;}
+    if((f.password||'').length<6){setMsg({t:'err',m:'Passwort mindestens 6 Zeichen.'});return;}
+    setBusy(true);setMsg(null);
+    const email=f.email.trim(), name=f.name.trim(), tmp=f.password;
+    try{
+      const wa=workerAuth();
+      const cred=await wa.createUserWithEmailAndPassword(email,tmp);
+      await db.ref(`${USERS}/${cred.user.uid}`).set({uid:cred.user.uid,name,email,role:f.role,
+        active:true,mustSetPassword:true,createdAt:Date.now(),createdBy:me.name||me.email||'',
+        allEvents:f.evAll?true:false, events:f.evAll?null:(Object.keys(f.evIds).length?f.evIds:null)});
+      await wa.signOut();
+      let mailed=false;
+      try{ await fbAuth.sendPasswordResetEmail(email); mailed=true; }catch(e){ console.warn('Mail',e); }
+      setMsg({t:'ok',name,email,tmp,mailed});
+      setF(p=>({...p,name:'',email:'',password:''}));
+    }catch(e){
+      setMsg({t:'err',m:AUTH_ERRORS[e.code]||('Konnte nicht anlegen: '+(e.code||e.message))});
+    }finally{ setBusy(false); }
+  };
+  const resend=async(email)=>{
+    try{ await fbAuth.sendPasswordResetEmail(email);
+      alert('E-Mail an '+email+' verschickt.\n\nHinweis: Landet oft im Spam-Ordner — dort nachsehen und als „Kein Spam" markieren.'); }
+    catch(e){ alert(AUTH_ERRORS[e.code]||('Konnte keine E-Mail senden: '+(e.code||e.message))); }
+  };
+  /* Einladung ohne E-Mail weitergeben — per WhatsApp, Signal, SMS … */
+  const shareInvite=async(name,email,tmp)=>{
+    const txt=`Hey ${name||''}, hier ist dein Zugang zu backstage.app:\n\n`+
+      `${location.href}\n\nE-Mail: ${email}\nStartpasswort: ${tmp||'(per Mail gesetzt)'}\n\n`+
+      `Beim ersten Öffnen legst du dein eigenes Passwort fest.`;
+    try{
+      if(navigator.share) await navigator.share({title:'backstage.app',text:txt});
+      else { await navigator.clipboard.writeText(txt); alert('Einladungstext kopiert — jetzt einfügen und verschicken.'); }
+    }catch(e){ if(e.name!=='AbortError'){ try{await navigator.clipboard.writeText(txt);alert('Einladungstext kopiert.');}catch(_){} } }
+  };
+
+  return(
+    <div className="min-h-screen flex flex-col">
+      <TopBar title="TEAM" sub={`${list.length} Konten`} onBack={onBack}
+        right={<button onClick={()=>{setAdding(!adding);setMsg(null);}}
+          className={`mono text-[11px] px-3 py-1.5 rounded-lg border transition-all
+            ${adding?'bg-zinc-800 border-zinc-600 text-zinc-300':'bg-amber-500 border-amber-500 text-black font-bold'}`}>
+          {adding?'✕':'+ Person'}</button>}/>
+      <div className="flex-1 overflow-y-auto px-4 pt-4 safe-bot">
+
+        {adding&&(
+          <div className="bg-zinc-900 border border-amber-500/30 rounded-xl p-3.5 mb-4 space-y-2.5 slide">
+            <div className="mono text-[10px] text-amber-400 uppercase tracking-wider">Neues Konto anlegen</div>
+            <input value={f.name} onChange={e=>set('name',e.target.value)} placeholder="Name"
+              className="w-full bg-zinc-800 border border-zinc-700 text-white mono text-sm px-3 py-2.5 rounded-lg focus:border-amber-500 placeholder-zinc-600"/>
+            <input value={f.email} onChange={e=>set('email',e.target.value)} placeholder="E-Mail" type="email" autoCapitalize="off"
+              className="w-full bg-zinc-800 border border-zinc-700 text-white mono text-sm px-3 py-2.5 rounded-lg focus:border-amber-500 placeholder-zinc-600"/>
+            <div className="flex gap-2">
+              <input value={f.password} onChange={e=>set('password',e.target.value)} placeholder="Startpasswort"
+                className="flex-1 bg-zinc-800 border border-zinc-700 text-white mono text-sm px-3 py-2.5 rounded-lg focus:border-amber-500 placeholder-zinc-600"/>
+              <button onClick={genPw} className="border border-zinc-700 text-zinc-400 mono text-[11px] px-3 rounded-lg active:bg-zinc-800">würfeln</button>
+            </div>
+            <div>
+              <div className="mono text-[9px] text-zinc-600 uppercase tracking-wider mb-1.5">Rolle</div>
+              <div className="flex gap-1.5 flex-wrap">
+                {OPTS.filter(o=>o[0]).map(([val,lab])=>(
+                  <button key={val} onClick={()=>set('role',val)}
+                    className={`px-2.5 py-1.5 rounded-md mono text-[10px] border transition-all
+                      ${f.role===val?'bg-amber-500/15 border-amber-500/40 text-amber-300':'bg-zinc-800 border-zinc-700 text-zinc-500'}`}>
+                    {lab}</button>))}
+              </div>
+            </div>
+            {f.role!=='superadmin'&&evList.length>0&&(
+              <div>
+                <div className="mono text-[9px] text-zinc-600 uppercase tracking-wider mb-1.5">Sichtbare Events</div>
+                <div className="flex gap-1.5 flex-wrap">
+                  <button onClick={()=>setF(p=>({...p,evAll:true,evIds:{}}))}
+                    className={`px-2 py-1 rounded-md mono text-[10px] border ${f.evAll?'bg-emerald-500/15 border-emerald-500/40 text-emerald-300':'bg-zinc-800 border-zinc-700 text-zinc-500'}`}>
+                    alle</button>
+                  {evList.map(e=>{
+                    const on=!f.evAll&&!!f.evIds[e.id];
+                    return <button key={e.id} onClick={()=>setF(p=>{
+                        const ids={...(p.evAll?{}:p.evIds)};
+                        on?delete ids[e.id]:ids[e.id]=true;
+                        return{...p,evAll:false,evIds:ids};})}
+                      className={`px-2 py-1 rounded-md mono text-[10px] border max-w-[140px] truncate ${on?'bg-amber-500/15 border-amber-500/40 text-amber-300':'bg-zinc-800 border-zinc-700 text-zinc-500'}`}>
+                      {e.name}</button>;})}
+                </div>
+              </div>)}
+            <button onClick={create} disabled={busy}
+              className={`w-full bebas text-lg py-2.5 rounded-lg tracking-widest ${busy?'bg-zinc-800 text-zinc-600':'bg-amber-500 text-black active:scale-[.98]'}`}>
+              {busy?'MOMENT…':'ANLEGEN & EINLADEN'}</button>
+
+            {msg&&msg.t==='err'&&(
+              <div className="mono text-[11px] leading-relaxed rounded-lg px-3 py-2.5 border bg-red-500/10 border-red-500/30 text-red-300">{msg.m}</div>)}
+            {msg&&msg.t==='ok'&&(
+              <div className="rounded-lg px-3 py-3 border bg-emerald-500/10 border-emerald-500/30 space-y-2">
+                <div className="mono text-[12px] text-emerald-200 font-bold">{msg.name} ist angelegt.</div>
+                {msg.mailed?(
+                  <div className="mono text-[11px] text-emerald-200/90 leading-relaxed">
+                    📧 Eine E-Mail ist an <span className="font-bold">{msg.email}</span> unterwegs.
+                    <span className="block text-amber-300/90 mt-1">⚠️ Landet häufig im Spam — sag der Person, sie soll dort nachsehen.</span></div>
+                ):(
+                  <div className="mono text-[11px] text-amber-200 leading-relaxed">
+                    ⚠️ Die E-Mail konnte nicht verschickt werden. Gib die Einladung unten direkt weiter.</div>)}
+                <div className="mono text-[10px] text-zinc-400 bg-zinc-950/60 rounded px-2.5 py-2 leading-relaxed">
+                  E-Mail: <span className="text-zinc-200">{msg.email}</span><br/>
+                  Startpasswort: <span className="text-zinc-200">{msg.tmp}</span><br/>
+                  Beim ersten Öffnen verlangt die App ein eigenes Passwort.</div>
+                <button onClick={()=>shareInvite(msg.name,msg.email,msg.tmp)}
+                  className="w-full bg-emerald-500 text-black mono text-[11px] font-bold py-2 rounded active:scale-[.98]">
+                  ↗ Einladung per WhatsApp / SMS senden</button>
+                <div className="flex gap-2">
+                  <button onClick={()=>navigator.clipboard?.writeText(`backstage.app\n${location.href}\nE-Mail: ${msg.email}\nStartpasswort: ${msg.tmp}`)}
+                    className="flex-1 border border-emerald-500/40 text-emerald-300 mono text-[10px] py-1.5 rounded">Daten kopieren</button>
+                  <button onClick={()=>resend(msg.email)}
+                    className="flex-1 border border-emerald-500/40 text-emerald-300 mono text-[10px] py-1.5 rounded">Mail nochmal</button>
+                </div>
+              </div>)}
+          </div>)}
+
+        {pending.length>0&&(
+          <div className="mb-5">
+            <SectionLabel right={<span className="mono text-[10px] bg-amber-500 text-black font-bold px-2 py-0.5 rounded-full">{pending.length}</span>}>
+              Offene Zugangsanfragen</SectionLabel>
+            <div className="space-y-2">
+              {pending.map(u=>(
+                <div key={u.id} className="rounded-xl border border-amber-500/40 bg-amber-500/[.07] px-4 py-3">
+                  <div className="mono text-sm font-bold text-zinc-100 truncate">{u.name||'Ohne Namen'}</div>
+                  <div className="mono text-[10px] text-zinc-400 truncate">{u.email}</div>
+                  <div className="mono text-[10px] text-zinc-500 mt-0.5">
+                    angefragt {u.createdAt?new Date(u.createdAt).toLocaleDateString('de-DE'):''}
+                    {u.wish&&<> · möchte <span className="text-amber-300">{ROLES[u.wish]?.label||u.wish}</span></>}</div>
+                  <div className="mono text-[9px] text-zinc-600 uppercase tracking-wider mt-2.5 mb-1.5">Freigeben als</div>
+                  <div className="flex gap-1.5 flex-wrap">
+                    {OPTS.filter(o=>o[0]).map(([val,lab])=>(
+                      <button key={val} onClick={()=>approve(u,val)}
+                        className={`px-2.5 py-1.5 rounded-md mono text-[10px] border transition-all active:scale-95
+                          ${u.wish===val?'bg-emerald-500 border-emerald-500 text-black font-bold':'bg-zinc-900 border-zinc-600 text-zinc-300 active:bg-zinc-800'}`}>
+                        {lab}</button>))}
+                    <button onClick={()=>{if(confirm(`Anfrage von ${u.name||u.email} ablehnen?`))fbDel(`${USERS}/${u.id}`);}}
+                      className="ml-auto mono text-[10px] text-zinc-500 border border-zinc-700 px-2.5 py-1.5 rounded-md active:text-red-400">
+                      ablehnen</button>
+                  </div>
+                </div>))}
+            </div>
+          </div>)}
+
+        {pending.length>0&&<SectionLabel>Team</SectionLabel>}
+        <div className="space-y-2">
+          {list.map(u=>{
+            const eff=ROLE_MAP[u.role]||'';
+            const isMe=u.uid===me.uid;
+            return(
+              <div key={u.id} className={`rounded-xl border px-4 py-3 ${u.active===false?'border-zinc-800/50 bg-zinc-900/25 opacity-50':'border-zinc-800 bg-zinc-900/60'}`}>
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="mono text-sm font-bold text-zinc-100 truncate">
+                      <TextEdit value={u.name||''} onSave={v=>fbUpd(`${USERS}/${u.id}`,{name:v})}
+                        cls="text-sm font-bold text-zinc-100" placeholder="Ohne Namen"/>
+                      {isMe&&<span className="text-amber-500 text-[10px] ml-1.5">(du)</span>}</div>
+                    <div className="mono text-[10px] text-zinc-500 truncate">{u.email}</div>
+                  </div>
+                  {eff&&<span className="mono text-[9px] px-2 py-1 rounded border flex-shrink-0"
+                    style={{color:ROLES[eff]?.color,borderColor:(ROLES[eff]?.color||'#666')+'55',background:(ROLES[eff]?.color||'#666')+'14'}}>
+                    {ROLES[eff]?.label}</span>}
+                </div>
+                <div className="flex gap-1.5 mt-2.5 flex-wrap items-center">
+                  {OPTS.map(([val,lab])=>(
+                    <button key={val||'none'} disabled={isMe&&val!=='superadmin'}
+                      onClick={()=>fbUpd(`${USERS}/${u.id}`,{role:val||null,active:true})}
+                      className={`px-2 py-1 rounded-md mono text-[10px] border transition-all
+                        ${(u.role||'')===val
+                          ?'bg-amber-500/15 border-amber-500/40 text-amber-300'
+                          :isMe&&val!=='superadmin'?'border-zinc-900 text-zinc-800'
+                          :'bg-zinc-900 border-zinc-700/70 text-zinc-500 active:bg-zinc-800'}`}>
+                      {lab}</button>))}
+                  <button onClick={()=>shareInvite(u.name,u.email,null)} title="Einladung teilen"
+                    className="ml-auto text-zinc-500 mono text-[10px] px-2 py-1 border border-zinc-700 rounded-md active:bg-zinc-800">↗ teilen</button>
+                  <button onClick={()=>resend(u.email)} title="Passwort-Link per E-Mail"
+                    className="text-zinc-500 mono text-[10px] px-2 py-1 border border-zinc-700 rounded-md active:bg-zinc-800">📧 Link</button>
+                  {!isMe&&(
+                    <button onClick={()=>{if(confirm(`${u.name||u.email} aus der Liste entfernen?\n\nDas Firebase-Konto bleibt bestehen — die Person hat aber keinen Zugang mehr.`))fbDel(`${USERS}/${u.id}`);}}
+                      className="text-zinc-700 mono text-[11px] px-1.5 active:text-red-400">✕</button>)}
+                </div>
+                {/* Welche Events darf die Person sehen? */}
+                {eff&&eff!=='superadmin'&&evList.length>0&&(
+                  <div className="mt-2.5 pt-2.5 border-t border-zinc-800/70">
+                    <div className="mono text-[9px] text-zinc-600 uppercase tracking-wider mb-1.5">Sichtbare Events</div>
+                    <div className="flex gap-1.5 flex-wrap">
+                      <button onClick={()=>fbUpd(`${USERS}/${u.id}`,{allEvents:true,events:null})}
+                        className={`px-2 py-1 rounded-md mono text-[10px] border transition-all
+                          ${u.allEvents!==false?'bg-emerald-500/15 border-emerald-500/40 text-emerald-300':'bg-zinc-900 border-zinc-700/70 text-zinc-500'}`}>
+                        alle</button>
+                      {evList.map(e=>{
+                        const on=u.allEvents===false&&!!(u.events||{})[e.id];
+                        return(
+                          <button key={e.id} onClick={()=>{
+                              const cur={...(u.events||{})};
+                              if(u.allEvents!==false){ fbUpd(`${USERS}/${u.id}`,{allEvents:false,events:{[e.id]:true}}); return; }
+                              on?delete cur[e.id]:cur[e.id]=true;
+                              fbUpd(`${USERS}/${u.id}`,{allEvents:false,events:Object.keys(cur).length?cur:null});
+                            }}
+                            className={`px-2 py-1 rounded-md mono text-[10px] border transition-all max-w-[140px] truncate
+                              ${on?'bg-amber-500/15 border-amber-500/40 text-amber-300':'bg-zinc-900 border-zinc-700/70 text-zinc-500 active:bg-zinc-800'}`}>
+                            {e.name}</button>);
+                      })}
+                    </div>
+                    {u.allEvents===false&&!Object.keys(u.events||{}).length&&(
+                      <div className="mono text-[9px] text-red-400/80 mt-1.5">Kein Event ausgewählt — sieht momentan nichts.</div>)}
+                  </div>)}
+              </div>);
+          })}
+          {list.length===0&&<Empty>Noch keine Konten.</Empty>}
+        </div>
+
+        <div className="mono text-[10px] text-zinc-500 leading-relaxed mt-6 border-t border-zinc-900 pt-4 space-y-2">
+          <div className="text-zinc-400 uppercase tracking-wider text-[9px]">Drei Wege, jemanden aufzunehmen</div>
+          <div><span className="text-zinc-300">1 · Du legst an</span> — „+ Person". Die Person bekommt automatisch eine E-Mail von Firebase, setzt darüber ihr eigenes Passwort und ist drin. Du siehst zusätzlich ein Startpasswort als Rückfallweg.</div>
+          <div><span className="text-zinc-300">2 · Selbst registrieren</span> — „Neu hier? → Konto erstellen", eigene E-Mail und eigenes Passwort, dazu ein Einladungscode:</div>
+          <div className="pl-3 text-zinc-400">LEITUNG → Leitung · DOOR → Einlass · FAHRER → Fahrer</div>
+          <div><span className="text-zinc-300">3 · Zugang anfragen</span> — ohne Code registrieren; die Anfrage erscheint hier oben und du gibst die Rolle frei.</div>
+          <div className="pt-1">Mit <span className="text-zinc-300">📧 Link</span> schickst du jederzeit eine neue Passwort-Mail, etwa wenn jemand sein Passwort vergessen hat.</div>
+          <div><span className="text-zinc-300">Sichtbare Events</span> stehen unter jeder Person — dort legst du fest, welche Events sie sieht.</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ══ VERBINDUNGS-DIAGNOSE ════════════════════════════════════════════ */
+const RULES=`{
+  "rules": {
+    "backstage": {
+      ".read": true,
+      ".write": true
+    }
+  }
+}`;
+function Connecting(){
+  return(
+    <div className="min-h-screen flex flex-col items-center justify-center gap-4 px-8 text-center">
+      <div className="bebas text-4xl text-zinc-700 tracking-wide">backstage<span className="text-zinc-600">.app</span></div>
+      <div className="flex gap-1.5">
+        {[0,1,2].map(i=><span key={i} className="w-2 h-2 rounded-full bg-zinc-600"
+          style={{animation:`fd .6s ${i*.15}s infinite alternate`}}/>)}</div>
+      <div className="mono text-xs text-zinc-600">Verbinde…</div>
+    </div>
+  );
+}
+/* Hinweis, wenn bewusst ohne Anmeldung getestet wird */
+function OfflineBanner({onExit}){
+  return(
+    <div onClick={onExit}
+      className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[150] bg-amber-500 text-black mono text-[10px] font-bold px-3 py-1.5 rounded-full shadow-lg active:scale-95 transition-transform cursor-pointer">
+      ⚡ Testmodus · nur dieses Gerät · tippen zum Beenden
+    </div>
+  );
+}
+
+/* ══ ROOT ════════════════════════════════════════════════════════════ */
+function App(){
+  const [auth,setAuth]=useState({state:'boot',user:null});   // Firebase-Konto
+  const [viewAs,setViewAs]=useState(()=>localStorage.getItem('uo-viewas')||'leitung');
+  const [events,setEvents]=useState(null);
+  /* Zuletzt geöffnetes Event ist beim nächsten Start der Landeplatz */
+  const [openId,setOpenId]=useState(()=>localStorage.getItem('uo-event')||null);
+  const [installHint,setInstallHint]=useState(()=>!isStandalone()&&!localStorage.getItem('uo-install-seen'));
+  const [creating,setCreating]=useState(false);
+  const [showTeam,setShowTeam]=useState(false);
+  const [offline,setOffline]=useState(false);
+  const driverId=useRef(localStorage.getItem('uo-driverid')||(()=>{const i='d'+uid();localStorage.setItem('uo-driverid',i);return i;})()).current;
+  const [gen,setGen]=useState(0);
+  const seeded=useRef(false);
+
+  /* Anmeldestatus beobachten und Profil laden */
+  useEffect(()=>{
+    if(offline)return;
+    let offUser=()=>{};
+    const unsub=fbAuth.onAuthStateChanged(u=>{
+      offUser();
+      if(!u){ setAuth({state:'out',user:null}); setEvents(null); return; }
+      offUser=fbOn(`${USERS}/${u.uid}`,prof=>{
+        setAuth({state:'in',user:{uid:u.uid,email:u.email,...(prof||{})}});
+      },()=>setAuth({state:'in',user:{uid:u.uid,email:u.email}}));
+    });
+    return()=>{unsub();offUser();};
+  },[offline]);
+
+  const role=offline?'superadmin':(auth.user?ROLE_MAP[auth.user.role]||'':'');
+
+  /* Daten erst laden, wenn jemand angemeldet ist */
+  useEffect(()=>{
+    if(!role)return;
+    setGen(g=>g+1);
+    return fbOn(`${ROOT}/events`,d=>{
+      setEvents(d||{});
+      if(!d&&!seeded.current){seeded.current=true;fbSet(`${ROOT}/events/ev_dortmund`,buildSeed());}
+    },()=>setEvents({}));
+  },[role,offline]);
+
+  /* Nur die Events, die diesem Konto zugewiesen sind */
+  const visible=useMemo(()=>{
+    if(!events)return {};
+    const u=auth.user||{};
+    if(offline||role==='superadmin'||u.allEvents!==false)return events;
+    const okIds=u.events||{};
+    return Object.fromEntries(Object.entries(events).filter(([id])=>okIds[id]));
+  },[events,auth.user,role,offline]);
+
+  /* Anzahl offener Zugangsanfragen — nur für Superadmin */
+  const [pendingCount,setPendingCount]=useState(0);
+  useEffect(()=>{
+    if(role!=='superadmin'||offline){setPendingCount(0);return;}
+    return fbOn(USERS,d=>setPendingCount(obj2arr(d).filter(u=>u.pending).length),()=>setPendingCount(0));
+  },[role,offline]);
+
+  const goOffline=useCallback(()=>{ MODE='local';seeded.current=false;setOffline(true);setEvents(null); },[]);
+  const logout=()=>{
+    ['uo-event'].forEach(k=>localStorage.removeItem(k));
+    setOpenId(null);setEvents(null);
+    if(offline){MODE='fb';setOffline(false);} else fbAuth.signOut();
+  };
+  const open=id=>{localStorage.setItem('uo-event',id);setOpenId(id);};
+  const back=()=>{localStorage.removeItem('uo-event');setOpenId(null);setShowTeam(false);};
+  /* Gemerktes Event vergessen, wenn es weg ist oder nicht mehr zugewiesen */
+  useEffect(()=>{
+    if(openId&&events&&!visible[openId]){localStorage.removeItem('uo-event');setOpenId(null);}
+  },[openId,events,visible]);
+  const switchRole=v=>{
+    if(v==='team'){setShowTeam(true);return;}
+    setShowTeam(false);
+    if(v==='events'){back();return;}
+    setViewAs(v);localStorage.setItem('uo-viewas',v);
+    if(!openId){const first=Object.keys(events||{})[0];if(first)open(first);}
+  };
+
+  let body;
+  if(!offline&&auth.state==='boot') body=<Connecting/>;
+  else if(!offline&&auth.state==='out') body=<LoginScreen onOffline={goOffline} onInstall={()=>setInstallHint(true)}/>;
+  else if(!role) body=<NoAccess user={auth.user||{}} onLogout={logout}/>;
+  else if(!offline&&auth.user?.mustSetPassword)
+    body=<SetPassword user={auth.user} onLogout={logout} onDone={()=>{}}/>;
+  else if(showTeam) body=<Team me={auth.user||{}} events={events||{}} onBack={()=>setShowTeam(false)}/>;
+  else if(events===null) body=<Connecting/>;
+  else if(creating) body=<NewEvent onCancel={()=>setCreating(false)} onCreated={id=>{setCreating(false);open(id);}}/>;
+  else if(openId&&visible[openId])
+    body=<EventShell eventId={openId} role={role} viewAs={viewAs} setViewAs={switchRole}
+      onBack={back} onLogout={logout} driverId={driverId}/>;
+  else body=<EventList events={visible} role={role} onOpen={open} onLogout={logout}
+    canManage={role==='superadmin'||role==='leitung'} onCreate={()=>setCreating(true)}
+    onSwitchRole={switchRole} onTeam={role==='superadmin'?()=>setShowTeam(true):null}
+    me={auth.user} pendingCount={pendingCount} restricted={auth.user?.allEvents===false}/>;
+  return(
+    <React.Fragment key={gen}>
+      <Toast/>
+      {offline&&role&&<OfflineBanner onExit={logout}/>}
+      {body}
+      {installHint&&<InstallHint onClose={()=>{localStorage.setItem('uo-install-seen','1');setInstallHint(false);}}/>}
+    </React.Fragment>);
+}
+/* ══ FEHLERFÄNGER ════════════════════════════════════════════════════
+   Fängt jede Ausnahme ab, damit statt eines schwarzen Bildschirms
+   immer die Ursache lesbar auf dem Handy steht.                      */
+class ErrorBoundary extends React.Component{
+  constructor(p){super(p);this.state={err:null,info:null};}
+  static getDerivedStateFromError(err){return{err};}
+  componentDidCatch(err,info){console.error('[Absturz]',err,info);this.setState({info});}
+  render(){
+    if(!this.state.err)return this.props.children;
+    const e=this.state.err;
+    const txt=`${e.name||'Fehler'}: ${e.message||e}\n\n${(this.state.info?.componentStack||e.stack||'').trim().split('\n').slice(0,12).join('\n')}`;
+    return(
+      <div className="min-h-screen overflow-y-auto px-6 py-10 safe-top safe-bot">
+        <div className="max-w-sm mx-auto space-y-4">
+          <div className="bebas text-3xl text-red-400 tracking-wider">ETWAS IST ABGESTÜRZT</div>
+          <div className="mono text-xs text-zinc-400 leading-relaxed">
+            Die App hat einen Fehler. Schick mir den Text unten, dann kann ich ihn beheben.</div>
+          <pre className="bg-zinc-900 border border-zinc-700 rounded-lg p-3 mono text-[10px] text-red-300 overflow-x-auto whitespace-pre-wrap leading-relaxed">{txt}</pre>
+          <button onClick={()=>{navigator.clipboard?.writeText(txt);}}
+            className="w-full border border-zinc-700 text-zinc-300 mono text-xs py-2.5 rounded-xl active:bg-zinc-900">
+            Fehlertext kopieren</button>
+          <button onClick={()=>this.setState({err:null,info:null})}
+            className="w-full bg-amber-500 text-black bebas text-lg py-3 rounded-xl tracking-widest">ZURÜCK ZUR APP</button>
+          <button onClick={()=>location.reload()}
+            className="w-full border border-zinc-700 text-zinc-400 mono text-xs py-2.5 rounded-xl active:bg-zinc-900">
+            App neu laden</button>
+        </div>
+      </div>);
+  }
+}
+ReactDOM.createRoot(document.getElementById('root'))
+  .render(<ErrorBoundary><App/></ErrorBoundary>);
+</script>
+</body>
+</html>
