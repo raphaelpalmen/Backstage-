@@ -151,6 +151,7 @@ const ROLE_MAP = {
   admin:'leitung', abendleitung:'leitung', techniker:'leitung', leitung:'leitung',
   kasse:'einlass', einlass:'einlass',
   fahrer:'fahrer',
+  artistcare:'artistcare', care:'artistcare',
 };
 const AUTH_ERRORS = {
   'auth/invalid-email':'Keine gültige E-Mail-Adresse.',
@@ -164,7 +165,8 @@ const AUTH_ERRORS = {
   'auth/operation-not-allowed':'E-Mail-Anmeldung ist im Firebase-Projekt nicht aktiviert.',
 };
 /* Einladungscode bestimmt nur die Rolle — die Sicherheit liegt im Passwort */
-const INVITE_ROLES = { LEITUNG:'leitung', DOOR:'einlass', EINLASS:'einlass', FAHRER:'fahrer' };
+const INVITE_ROLES = { LEITUNG:'leitung', DOOR:'einlass', EINLASS:'einlass', FAHRER:'fahrer',
+  CARE:'artistcare', ARTISTCARE:'artistcare' };
 </script>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Bebas+Neue&display=swap" rel="stylesheet">
@@ -198,10 +200,11 @@ const {useState,useEffect,useCallback,useRef,useMemo}=React;
 
 /* ══ CONFIG ══════════════════════════════════════════════════════════ */
 const ROLES={
-  superadmin:{code:'UNREAL',  label:'SUPERADMIN', color:'#f59e0b'},
-  leitung:   {code:'LEITUNG', label:'LEITUNG',    color:'#f59e0b'},
-  einlass:   {code:'DOOR',    label:'EINLASS',    color:'#10b981'},
-  fahrer:    {code:'FAHRER',  label:'FAHRER',     color:'#3b82f6'},
+  superadmin:{code:'UNREAL',  label:'SUPERADMIN',  color:'#f59e0b'},
+  leitung:   {code:'LEITUNG', label:'LEITUNG',     color:'#f59e0b'},
+  einlass:   {code:'DOOR',    label:'EINLASS',     color:'#10b981'},
+  fahrer:    {code:'FAHRER',  label:'FAHRER',      color:'#3b82f6'},
+  artistcare:{code:'CARE',    label:'ARTIST CARE', color:'#a78bfa'},
 };
 const STATUS_ALL=[
   {k:'pickup_ok',    l:'Pickup ✓'},
@@ -659,6 +662,7 @@ function LoginScreen({onOffline,onInstall}){
                   <option value="leitung">Leitung</option>
                   <option value="einlass">Einlass</option>
                   <option value="fahrer">Fahrer</option>
+                  <option value="artistcare">Artist Care</option>
                 </select>)}
               <div className="mono text-[10px] text-zinc-600 leading-relaxed px-1">
                 {f.invite.trim()
@@ -824,6 +828,7 @@ function SuperBar({onSwitchRole,active}){
     {id:'leitung',l:'LEITUNG', c:'#f59e0b'},
     {id:'einlass',l:'EINLASS', c:'#10b981'},
     {id:'fahrer', l:'FAHRER',  c:'#3b82f6'},
+    {id:'artistcare',l:'CARE', c:'#a78bfa'},
     {id:'admin',  l:'VERWALTEN',c:'#f472b6'},
     {id:'team',   l:'TEAM',    c:'#e879f9'},
   ];
@@ -3172,6 +3177,7 @@ function EventShell({eventId,role,viewAs,setViewAs,onBack,onLogout,driverId,me})
   useEffect(()=>{
     if(viewAs==='einlass')setTab('guests');
     else if(viewAs==='fahrer')setTab('fahrer');
+    else if(viewAs==='artistcare')setTab('lineup');
     else if(viewAs==='admin')setTab('settings');
     else setTab('lineup');
   },[viewAs]);
@@ -3179,7 +3185,10 @@ function EventShell({eventId,role,viewAs,setViewAs,onBack,onLogout,driverId,me})
   const meta=ev.meta||{};
   const isSuper=role==='superadmin';
   const eff=isSuper?viewAs:role;            // effective role
-  const editable=isSuper||eff==='leitung';
+  /* Beim Vorschau-Wechsel des Superadmins auch dessen Rechte spiegeln */
+  const editable=isSuper
+    ? ['leitung','admin','events'].includes(viewAs)
+    : eff==='leitung';
   const drivers=obj2arr(ev.drivers);
   const openP=obj2arr(ev.pickups).filter(p=>!p.done).length;
   const liveD=drivers.filter(d=>d.active).length;
@@ -3199,6 +3208,11 @@ function EventShell({eventId,role,viewAs,setViewAs,onBack,onLogout,driverId,me})
   } else if(eff==='fahrer'){
     tabs=[{id:'fahrer',label:'FAHRTEN',badge:openP+openT},
           {id:'grid',label:'RASTER'},{id:'contacts',label:'KONTAKTE'}];
+  } else if(eff==='artistcare'){
+    tabs=[{id:'lineup',label:'LINE-UP'},{id:'grid',label:'RASTER'},{id:'run',label:'ABLAUF'},
+          {id:'shop',label:'EINKAUF'},{id:'pickups',label:'PICKUPS',badge:openP},
+          {id:'travel',label:'AN/ABREISE',badge:openT},{id:'map',label:'KARTE',badge:liveD},
+          {id:'contacts',label:'KONTAKTE'},{id:'notes',label:'NOTES'}];
   }
   const valid=tabs.some(t=>t.id===tab)?tab:tabs[0]?.id;
   const accent=ROLES[eff]?.color||'#fafafa';
@@ -3296,7 +3310,8 @@ function Team({me,onBack,events}){
   const all=obj2arr(users).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
   const pending=all.filter(u=>u.pending);
   const list=all.filter(u=>!u.pending);
-  const OPTS=[['superadmin','Superadmin'],['leitung','Leitung'],['einlass','Einlass'],['fahrer','Fahrer'],['','kein Zugang']];
+  const OPTS=[['superadmin','Superadmin'],['leitung','Leitung'],['einlass','Einlass'],
+              ['fahrer','Fahrer'],['artistcare','Artist Care'],['','kein Zugang']];
   const evList=obj2arr(events).map(e=>({id:e.id,name:e.meta?.name||'Ohne Titel',date:e.meta?.date||''}))
     .filter(e=>!(events[e.id]?.meta?.archived));
   const approve=(u,role)=>fbUpd(`${USERS}/${u.id}`,{role,pending:null,wish:null,active:true});
@@ -3518,7 +3533,9 @@ function Team({me,onBack,events}){
           <div className="text-zinc-400 uppercase tracking-wider text-[9px]">Drei Wege, jemanden aufzunehmen</div>
           <div><span className="text-zinc-300">1 · Du legst an</span> — „+ Person". Die Person bekommt automatisch eine E-Mail von Firebase, setzt darüber ihr eigenes Passwort und ist drin. Du siehst zusätzlich ein Startpasswort als Rückfallweg.</div>
           <div><span className="text-zinc-300">2 · Selbst registrieren</span> — „Neu hier? → Konto erstellen", eigene E-Mail und eigenes Passwort, dazu ein Einladungscode:</div>
-          <div className="pl-3 text-zinc-400">LEITUNG → Leitung · DOOR → Einlass · FAHRER → Fahrer</div>
+          <div className="pl-3 text-zinc-400">
+            LEITUNG → Leitung · DOOR → Einlass<br/>
+            FAHRER → Fahrer · CARE → Artist Care</div>
           <div><span className="text-zinc-300">3 · Zugang anfragen</span> — ohne Code registrieren; die Anfrage erscheint hier oben und du gibst die Rolle frei.</div>
           <div className="pt-1">Mit <span className="text-zinc-300">📧 Link</span> schickst du jederzeit eine neue Passwort-Mail, etwa wenn jemand sein Passwort vergessen hat.</div>
           <div><span className="text-zinc-300">Sichtbare Events</span> stehen unter jeder Person — dort legst du fest, welche Events sie sieht.</div>
