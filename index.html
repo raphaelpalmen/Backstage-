@@ -138,6 +138,10 @@ const fbOn  = (p,cb,onErr)=>{
   return ()=>r.off('value',h);
 };
 const fbOnce= (p)=> MODE==='local' ? Promise.resolve(_clone(_get(p))) : db.ref(p).once('value').then(s=>s.val());
+/* Zähler: atomar hochzählen, damit zwei Leute am Einlass sich nicht überschreiben */
+const fbInc = (p,d)=> MODE==='local'
+  ? (_set(p,Math.max(0,(Number(_get(p))||0)+d)),Promise.resolve())
+  : db.ref(p).transaction(v=>Math.max(0,(Number(v)||0)+d)).catch(rep('zählen',p));
 
 /* ── Konten (geteilt mit der alten App) ────────────────────────────── */
 const USERS = 'backstage/appUsers';
@@ -2000,6 +2004,350 @@ function TravelSheet({t,onClose,onSave,onDelete}){
   );
 }
 
+/* ══ ABENDKASSE ══════════════════════════════════════════════════════ */
+const eur=n=>(Number(n)||0).toFixed(2).replace('.',',')+' €';
+const CNT=[
+  {k:'ecNorm', l:'EC · Normal',    pay:'ec',  kind:'norm',  c:'#60a5fa'},
+  {k:'barNorm',l:'Bar · Normal',   pay:'bar', kind:'norm',  c:'#34d399'},
+  {k:'ecFr',   l:'EC · Friends',   pay:'ec',  kind:'fr',    c:'#a78bfa'},
+  {k:'barFr',  l:'Bar · Friends',  pay:'bar', kind:'fr',    c:'#fbbf24'},
+];
+const blockSum=b=>{
+  const c=b.counts||{};
+  const p=Number(b.price)||0, f=Number(b.friendsPrice)||0;
+  const ec=(Number(c.ecNorm)||0)*p+(Number(c.ecFr)||0)*f;
+  const bar=(Number(c.barNorm)||0)*p+(Number(c.barFr)||0)*f;
+  const people=CNT.reduce((s,x)=>s+(Number(c[x.k])||0),0);
+  return{ec,bar,total:ec+bar,people};
+};
+const kasseTotals=ev=>{
+  const blocks=obj2arr(ev.kasse?.blocks);
+  let ec=0,bar=0,people=0;
+  blocks.forEach(b=>{const s=blockSum(b);ec+=s.ec;bar+=s.bar;people+=s.people;});
+  const payouts=obj2arr(ev.kasse?.payouts);
+  const out=payouts.reduce((s,p)=>s+(Number(p.amount)||0),0);
+  return{blocks,payouts,ec,bar,total:ec+bar,people,out,cash:bar-out,net:ec+bar-out};
+};
+
+function Kasse({ev,base,role}){
+  const meta=ev.meta||{};
+  const blocks=obj2arr(ev.kasse?.blocks).sort((a,b)=>(a.startedAt||0)-(b.startedAt||0));
+  const active=blocks.find(b=>!b.closedAt);
+  const [newPrice,setNewPrice]=useState(false);
+  const [np,setNp]=useState({label:'',price:'',friendsPrice:''});
+
+  const startBlock=(label,price,friendsPrice)=>{
+    const id='b'+Date.now();
+    fbSet(`${base}/kasse/blocks/${id}`,{label:label||'Preis 1',price:Number(price)||0,
+      friendsPrice:Number(friendsPrice)||0,startedAt:Date.now(),closedAt:null,
+      counts:{ecNorm:0,barNorm:0,ecFr:0,barFr:0}});
+  };
+  const switchPrice=()=>{
+    if(active)fbUpd(`${base}/kasse/blocks/${active.id}`,{closedAt:Date.now()});
+    startBlock(np.label||`Preis ${blocks.length+1}`,np.price,np.friendsPrice);
+    setNp({label:'',price:'',friendsPrice:''});setNewPrice(false);
+  };
+
+  if(!active)return(
+    <div className="px-4 pt-4 pb-24">
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4 space-y-3">
+        <div className="bebas text-xl text-white tracking-wide">Abendkasse starten</div>
+        <div className="mono text-[11px] text-zinc-500 leading-relaxed">
+          Leg die Preise für den Abend fest. Später kannst du jederzeit auf einen neuen Preis umstellen — der Zähler beginnt dann von vorn, das Vorherige bleibt gespeichert.</div>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Eintritt normal" value={np.price} onChange={v=>setNp(p=>({...p,price:v}))} placeholder="15" type="number"/>
+          <Field label="Friendslist" value={np.friendsPrice} onChange={v=>setNp(p=>({...p,friendsPrice:v}))} placeholder="10" type="number"/>
+        </div>
+        <Field label="Bezeichnung" value={np.label} onChange={v=>setNp(p=>({...p,label:v}))} placeholder="Normalpreis"/>
+        <button onClick={()=>startBlock(np.label||'Normalpreis',np.price,np.friendsPrice)}
+          className="w-full bg-emerald-500 text-black bebas text-xl py-3 rounded-xl tracking-widest active:scale-[.98]">
+          KASSE ÖFFNEN</button>
+      </div>
+      {blocks.length>0&&<div className="mt-5"><ClosedBlocks blocks={blocks}/></div>}
+    </div>);
+
+  const s=blockSum(active);
+  const c=active.counts||{};
+  return(
+    <div className="px-4 pt-4 pb-24">
+      {/* aktueller Preis */}
+      <div className="rounded-xl border border-amber-500/30 bg-amber-500/[.07] px-4 py-3 mb-4">
+        <div className="flex items-center gap-2">
+          <div className="flex-1 min-w-0">
+            <div className="mono text-[9px] text-amber-500/80 uppercase tracking-[.18em]">Aktueller Preis</div>
+            <div className="mono text-sm font-bold text-zinc-100 truncate">{active.label}</div>
+          </div>
+          <div className="text-right">
+            <div className="bebas text-2xl text-amber-400 leading-none">{eur(active.price)}</div>
+            <div className="mono text-[10px] text-zinc-500">Friends {eur(active.friendsPrice)}</div>
+          </div>
+        </div>
+        <div className="mono text-[10px] text-zinc-600 mt-1">
+          seit {new Date(active.startedAt).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})} Uhr</div>
+      </div>
+
+      {/* Zähler */}
+      <div className="grid grid-cols-2 gap-2.5 mb-4">
+        {CNT.map(x=>{
+          const n=Number(c[x.k])||0;
+          const price=x.kind==='fr'?active.friendsPrice:active.price;
+          return(
+            <div key={x.k} className="rounded-xl border bg-zinc-900/70 p-2.5"
+              style={{borderColor:x.c+'44'}}>
+              <div className="mono text-[10px] font-bold mb-0.5" style={{color:x.c}}>{x.l}</div>
+              <div className="mono text-[9px] text-zinc-600 mb-2">à {eur(price)}</div>
+              <div className="flex items-center gap-2">
+                <button onClick={()=>fbInc(`${base}/kasse/blocks/${active.id}/counts/${x.k}`,-1)}
+                  className="w-10 h-10 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 text-xl leading-none active:bg-zinc-700 flex items-center justify-center flex-shrink-0">−</button>
+                <div className="flex-1 text-center">
+                  <div className="bebas text-3xl leading-none" style={{color:n?x.c:'#3f3f46'}}>{n}</div>
+                  <div className="mono text-[9px] text-zinc-600">{eur(n*price)}</div>
+                </div>
+                <button onClick={()=>fbInc(`${base}/kasse/blocks/${active.id}/counts/${x.k}`,1)}
+                  className="w-10 h-10 rounded-lg text-black text-xl leading-none active:scale-90 flex items-center justify-center flex-shrink-0 font-bold"
+                  style={{background:x.c}}>+</button>
+              </div>
+            </div>);
+        })}
+      </div>
+
+      {/* Zwischensumme */}
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 px-4 py-3 mb-4">
+        <div className="flex justify-between mono text-[11px] text-zinc-400 mb-1"><span>EC</span><span>{eur(s.ec)}</span></div>
+        <div className="flex justify-between mono text-[11px] text-zinc-400 mb-2"><span>Bar</span><span>{eur(s.bar)}</span></div>
+        <div className="flex justify-between items-baseline border-t border-zinc-800 pt-2">
+          <span className="mono text-[11px] text-zinc-300">Dieser Preisblock · {s.people} Gäste</span>
+          <span className="bebas text-2xl text-emerald-400">{eur(s.total)}</span></div>
+      </div>
+
+      <button onClick={()=>{setNp({label:'',price:String(active.price),friendsPrice:String(active.friendsPrice)});setNewPrice(true);}}
+        className="w-full border border-dashed border-zinc-700 text-zinc-400 mono text-xs py-3 rounded-xl active:bg-zinc-900 mb-5">
+        ↻ Neuer Preis — Zähler beginnt von vorn</button>
+
+      <ClosedBlocks blocks={blocks.filter(b=>b.closedAt)}/>
+
+      <Sheet open={newPrice} onClose={()=>setNewPrice(false)} title="Neuer Preis">
+        <div className="space-y-3">
+          <div className="mono text-[11px] text-zinc-500 leading-relaxed">
+            Der laufende Block „{active.label}" wird abgeschlossen und mit {eur(s.total)} gespeichert.
+            Danach zählst du zum neuen Preis von vorne.</div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Eintritt normal" value={np.price} onChange={v=>setNp(p=>({...p,price:v}))} type="number"/>
+            <Field label="Friendslist" value={np.friendsPrice} onChange={v=>setNp(p=>({...p,friendsPrice:v}))} type="number"/>
+          </div>
+          <Field label="Bezeichnung" value={np.label} onChange={v=>setNp(p=>({...p,label:v}))} placeholder="z. B. Spätpreis ab 1 Uhr"/>
+          <button onClick={switchPrice}
+            className="w-full bg-amber-500 text-black bebas text-xl py-3 rounded-xl tracking-widest active:scale-[.98]">
+            UMSTELLEN</button>
+        </div>
+      </Sheet>
+    </div>
+  );
+}
+function ClosedBlocks({blocks}){
+  const done=blocks.filter(b=>b.closedAt);
+  if(!done.length)return null;
+  return(
+    <div>
+      <SectionLabel>Abgeschlossene Preisblöcke</SectionLabel>
+      <div className="space-y-2">
+        {done.map(b=>{const s=blockSum(b);
+          return(
+            <div key={b.id} className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-3.5 py-2.5">
+              <div className="flex items-center gap-2">
+                <div className="flex-1 min-w-0">
+                  <div className="mono text-[12px] font-bold text-zinc-300 truncate">{b.label}</div>
+                  <div className="mono text-[10px] text-zinc-600">
+                    {new Date(b.startedAt).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})}–
+                    {new Date(b.closedAt).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})} ·
+                    {eur(b.price)} / {eur(b.friendsPrice)} · {s.people} Gäste</div>
+                </div>
+                <div className="mono text-sm font-bold text-zinc-200">{eur(s.total)}</div>
+              </div>
+            </div>);})}
+      </div>
+    </div>);
+}
+
+/* ══ AUSZAHLUNGEN ════════════════════════════════════════════════════ */
+function Payouts({ev,base,me}){
+  const [f,setF]=useState({label:'',amount:'',note:''});
+  const list=obj2arr(ev.kasse?.payouts).sort((a,b)=>(b.at||0)-(a.at||0));
+  const sum=list.reduce((s,p)=>s+(Number(p.amount)||0),0);
+  const add=()=>{
+    if(!f.label.trim()||!(Number(f.amount)>0))return;
+    fbPush(`${base}/kasse/payouts`,{label:f.label.trim(),amount:Number(f.amount),
+      note:f.note.trim(),by:me?.name||me?.email||'Einlass',at:Date.now()});
+    setF({label:'',amount:'',note:''});
+  };
+  return(
+    <div className="px-4 pt-4 pb-24">
+      <div className="rounded-xl border border-red-500/25 bg-red-500/[.06] px-4 py-3 mb-4 flex items-center">
+        <div className="flex-1">
+          <div className="mono text-[9px] text-red-400/80 uppercase tracking-[.18em]">Aus der Kasse gezahlt</div>
+          <div className="mono text-[10px] text-zinc-600 mt-0.5">{list.length} Belege</div>
+        </div>
+        <div className="bebas text-3xl text-red-400 leading-none">−{eur(sum)}</div>
+      </div>
+
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 mb-4 space-y-2">
+        <div className="mono text-[10px] text-zinc-500 uppercase tracking-wider">Neue Auszahlung</div>
+        <div className="flex gap-2">
+          <input value={f.label} onChange={e=>setF(p=>({...p,label:e.target.value}))} placeholder="Wofür? z. B. Security"
+            className="flex-1 bg-zinc-800 border border-zinc-700 text-white mono text-sm px-3 py-2.5 rounded-lg focus:border-amber-500 placeholder-zinc-600"/>
+          <input value={f.amount} onChange={e=>setF(p=>({...p,amount:e.target.value}))} placeholder="0,00" type="number" inputMode="decimal"
+            className="w-24 bg-zinc-800 border border-zinc-700 text-white mono text-sm px-3 py-2.5 rounded-lg focus:border-amber-500 placeholder-zinc-600 text-right"/>
+        </div>
+        <div className="flex gap-2">
+          <input value={f.note} onChange={e=>setF(p=>({...p,note:e.target.value}))} onKeyDown={e=>e.key==='Enter'&&add()}
+            placeholder="Belegnummer / Notiz (optional)"
+            className="flex-1 bg-zinc-800 border border-zinc-700 text-white mono text-xs px-3 py-2.5 rounded-lg focus:border-amber-500 placeholder-zinc-600"/>
+          <button onClick={add} className="bg-amber-500 text-black mono text-xs font-bold px-5 rounded-lg active:scale-95">+</button>
+        </div>
+      </div>
+
+      <SectionLabel>Belege</SectionLabel>
+      <div className="space-y-2">
+        {list.length===0&&<Empty>Noch keine Auszahlungen.</Empty>}
+        {list.map(p=>(
+          <div key={p.id} className="rounded-xl border border-zinc-800 bg-zinc-900/60 px-3.5 py-3 flex items-start gap-3">
+            <div className="flex-1 min-w-0">
+              <div className="mono text-[13px] font-bold text-zinc-100 truncate">{p.label}</div>
+              {p.note&&<div className="mono text-[10px] text-zinc-500 truncate">{p.note}</div>}
+              <div className="mono text-[9px] text-zinc-600 mt-0.5">
+                {p.by} · {p.at?new Date(p.at).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'}):''} Uhr</div>
+            </div>
+            <div className="mono text-sm font-bold text-red-400 flex-shrink-0">−{eur(p.amount)}</div>
+            <button onClick={()=>{if(confirm(`"${p.label}" löschen?`))fbDel(`${base}/kasse/payouts/${p.id}`);}}
+              className="text-zinc-700 mono text-xs active:text-red-400 flex-shrink-0">✕</button>
+          </div>))}
+      </div>
+    </div>
+  );
+}
+
+/* ══ ABRECHNUNG ══════════════════════════════════════════════════════ */
+function Abrechnung({ev,base,me,role}){
+  const meta=ev.meta||{};
+  const t=kasseTotals(ev);
+  const st=ev.kasse?.settlement||null;
+  const canConfirm=role==='leitung'||role==='superadmin';
+  const guests=obj2arr(ev.guestlist).filter(g=>g.checkedIn).length;
+  const friends=obj2arr(ev.friendslist).filter(g=>g.checkedIn).length;
+
+  const text=useMemo(()=>{
+    const L=[];
+    L.push(`ABRECHNUNG — ${meta.name||'Event'}`);
+    L.push(`${meta.date||''} · ${meta.city||''}`);
+    L.push('');
+    L.push('PREISBLÖCKE');
+    t.blocks.forEach(b=>{const s=blockSum(b);const cc=b.counts||{};
+      L.push(`  ${b.label} (${eur(b.price)} / Friends ${eur(b.friendsPrice)})`);
+      L.push(`    EC:  ${cc.ecNorm||0} normal, ${cc.ecFr||0} friends  = ${eur(s.ec)}`);
+      L.push(`    Bar: ${cc.barNorm||0} normal, ${cc.barFr||0} friends = ${eur(s.bar)}`);
+      L.push(`    Summe: ${eur(s.total)} · ${s.people} Gäste`);});
+    L.push('');
+    L.push(`EINNAHMEN EC    ${eur(t.ec)}`);
+    L.push(`EINNAHMEN BAR   ${eur(t.bar)}`);
+    L.push(`GESAMT          ${eur(t.total)}`);
+    L.push(`Zahlende Gäste  ${t.people}`);
+    L.push('');
+    L.push('AUSZAHLUNGEN');
+    if(!t.payouts.length)L.push('  keine');
+    t.payouts.forEach(p=>L.push(`  ${p.label}${p.note?' ('+p.note+')':''}  −${eur(p.amount)}  [${p.by}]`));
+    L.push(`  Summe        −${eur(t.out)}`);
+    L.push('');
+    L.push(`BARGELD ZUR ÜBERGABE  ${eur(t.cash)}`);
+    L.push(`NETTO GESAMT          ${eur(t.net)}`);
+    L.push('');
+    L.push(`Eingecheckt: Gästeliste ${guests} · Friendslist ${friends}`);
+    L.push('');
+    L.push(`Bestätigt von ${me?.name||me?.email||''} am ${new Date().toLocaleString('de-DE')}`);
+    return L.join('\n');
+  },[JSON.stringify([ev.kasse,meta,guests,friends])]);
+
+  const confirmSend=()=>{
+    const to=(meta.settleEmail||'').trim();
+    if(!to){alert('Es ist keine Empfängeradresse hinterlegt.\n\nDie Leitung trägt sie unter EVENT → Abrechnung ein.');return;}
+    fbSet(`${base}/kasse/settlement`,{confirmedBy:me?.name||me?.email||'',confirmedAt:Date.now(),
+      sentTo:to,ec:t.ec,bar:t.bar,total:t.total,out:t.out,cash:t.cash,net:t.net,people:t.people,text});
+    const subj=`Abrechnung ${meta.name||'Event'} — ${meta.date||''}`;
+    window.location.href=`mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(text)}`;
+  };
+
+  const Row=({l,v,strong,neg})=>(
+    <div className={`flex justify-between items-baseline ${strong?'border-t border-zinc-800 pt-2 mt-2':''}`}>
+      <span className={`mono ${strong?'text-[12px] text-zinc-200':'text-[11px] text-zinc-500'}`}>{l}</span>
+      <span className={strong?`bebas text-2xl ${neg?'text-red-400':'text-emerald-400'}`:`mono text-[12px] ${neg?'text-red-400':'text-zinc-300'}`}>
+        {neg?'−':''}{eur(v)}</span>
+    </div>);
+
+  return(
+    <div className="px-4 pt-4 pb-24">
+      {st&&(
+        <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 mb-4">
+          <div className="mono text-[11px] text-emerald-200 leading-relaxed">
+            ✓ Bestätigt von {st.confirmedBy}<br/>
+            {new Date(st.confirmedAt).toLocaleString('de-DE')} · gesendet an {st.sentTo}</div>
+        </div>)}
+
+      <SectionLabel>Einnahmen</SectionLabel>
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 px-4 py-3 mb-4">
+        <Row l="EC-Zahlungen" v={t.ec}/>
+        <Row l="Barzahlungen" v={t.bar}/>
+        <div className="mono text-[10px] text-zinc-600 mt-1">{t.people} zahlende Gäste in {t.blocks.length} Preisblock{t.blocks.length===1?'':'en'}</div>
+        <Row l="Einnahmen gesamt" v={t.total} strong/>
+      </div>
+
+      <SectionLabel>Auszahlungen</SectionLabel>
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 px-4 py-3 mb-4">
+        {t.payouts.length===0&&<div className="mono text-[11px] text-zinc-600">keine</div>}
+        {t.payouts.map(p=>(
+          <div key={p.id} className="flex justify-between mono text-[11px] mb-1">
+            <span className="text-zinc-500 truncate pr-2">{p.label}</span>
+            <span className="text-red-400 flex-shrink-0">−{eur(p.amount)}</span></div>))}
+        <Row l="Auszahlungen gesamt" v={t.out} strong neg/>
+      </div>
+
+      <SectionLabel>Ergebnis</SectionLabel>
+      <div className="rounded-xl border border-amber-500/30 bg-amber-500/[.07] px-4 py-3.5 mb-4">
+        <div className="flex justify-between items-baseline mb-2">
+          <span className="mono text-[12px] text-zinc-200">Bargeld zur Übergabe</span>
+          <span className="bebas text-3xl text-amber-400">{eur(t.cash)}</span></div>
+        <div className="mono text-[10px] text-zinc-500 leading-relaxed mb-2">
+          Barzahlungen minus Auszahlungen — dieser Betrag muss in der Kasse liegen.</div>
+        <div className="flex justify-between items-baseline border-t border-amber-500/20 pt-2">
+          <span className="mono text-[11px] text-zinc-400">Netto gesamt (EC + Bar − Auszahlungen)</span>
+          <span className="mono text-sm font-bold text-zinc-100">{eur(t.net)}</span></div>
+      </div>
+
+      <details className="mb-4">
+        <summary className="mono text-[11px] text-zinc-500 py-2 cursor-pointer">Vollständige Abrechnung ansehen</summary>
+        <pre className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 mono text-[10px] text-zinc-300 overflow-x-auto whitespace-pre-wrap leading-relaxed mt-1">{text}</pre>
+      </details>
+
+      {canConfirm?(
+        <div className="space-y-2">
+          <div className="mono text-[10px] text-zinc-500 leading-relaxed">
+            Empfänger: <span className="text-zinc-300">{meta.settleEmail||'— noch keiner hinterlegt —'}</span>
+          </div>
+          <button onClick={confirmSend}
+            className="w-full bg-emerald-500 text-black bebas text-xl py-3.5 rounded-xl tracking-widest active:scale-[.98]">
+            {st?'ERNEUT BESTÄTIGEN & SENDEN':'BESTÄTIGEN & SENDEN'}</button>
+          <button onClick={()=>navigator.clipboard?.writeText(text)}
+            className="w-full border border-zinc-700 text-zinc-400 mono text-xs py-2.5 rounded-xl active:bg-zinc-900">
+            Abrechnung kopieren</button>
+          <div className="mono text-[10px] text-zinc-600 leading-relaxed pt-1">
+            Beim Bestätigen wird die Abrechnung gespeichert und dein Mailprogramm mit fertiger Nachricht geöffnet — du musst dort nur noch auf Senden tippen.</div>
+        </div>
+      ):(
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-4 py-3 mono text-[11px] text-zinc-500 leading-relaxed">
+          Die Abendleitung bestätigt und verschickt die Abrechnung. Zähl in Ruhe fertig — hier siehst du jederzeit den Stand.
+        </div>)}
+    </div>
+  );
+}
+
 /* ══ KONTAKTE · als Kontaktkarte (.vcf) speicherbar ══════════════════ */
 const telClean=p=>String(p||'').replace(/[^\d+]/g,'');
 const vcard=(c,evName)=>{
@@ -2249,6 +2597,15 @@ function Settings({ev,base,eventId,onDeleted}){
         </div>
       </div>
       <div>
+        <SectionLabel>Abrechnung</SectionLabel>
+        <div className="space-y-3">
+          <Field label="Abrechnung geht an (E-Mail)" value={meta.settleEmail} onChange={v=>set('settleEmail',v)}
+            placeholder="name@beispiel.de" type="email"/>
+          <div className="mono text-[10px] text-zinc-600 leading-relaxed">
+            An diese Adresse schickt die Abendleitung am Ende die fertige Abrechnung.</div>
+        </div>
+      </div>
+      <div>
         <SectionLabel>Dortmund-Stammdaten nachladen</SectionLabel>
         <div className="space-y-2">
           <button onClick={()=>{if(confirm('Rider & Techrider aller Dortmund-Artists einspielen? Bestehende Rider werden überschrieben.'))
@@ -2274,7 +2631,7 @@ function Settings({ev,base,eventId,onDeleted}){
 }
 
 /* ══ EVENT SHELL ═════════════════════════════════════════════════════ */
-function EventShell({eventId,role,viewAs,setViewAs,onBack,onLogout,driverId}){
+function EventShell({eventId,role,viewAs,setViewAs,onBack,onLogout,driverId,me}){
   const base=`${ROOT}/events/${eventId}`;
   const [ev,setEv]=useState(null);
   const [tab,setTab]=useState('lineup');
@@ -2300,10 +2657,12 @@ function EventShell({eventId,role,viewAs,setViewAs,onBack,onLogout,driverId}){
     tabs=[{id:'grid',label:'RASTER'},{id:'run',label:'ABLAUF'},{id:'lineup',label:'LINE-UP'},
           {id:'pickups',label:'PICKUPS',badge:openP},{id:'travel',label:'AN/ABREISE',badge:openT},
           {id:'shop',label:'EINKAUF'},{id:'map',label:'KARTE',badge:liveD},
-          {id:'guests',label:'GÄSTE'},{id:'contacts',label:'KONTAKTE'},{id:'notes',label:'NOTES'},
+          {id:'guests',label:'GÄSTE'},{id:'kasse',label:'KASSE'},{id:'payouts',label:'AUSZAHLUNG'},
+          {id:'settle',label:'ABRECHNUNG'},{id:'contacts',label:'KONTAKTE'},{id:'notes',label:'NOTES'},
           ...(editable?[{id:'settings',label:'EVENT'}]:[])];
   } else if(eff==='einlass'){
-    tabs=[{id:'guests',label:'GÄSTE'},{id:'grid',label:'RASTER'}];
+    tabs=[{id:'guests',label:'GÄSTE'},{id:'kasse',label:'KASSE'},
+          {id:'payouts',label:'AUSZAHLUNG'},{id:'settle',label:'ABRECHNUNG'},{id:'grid',label:'RASTER'}];
   } else if(eff==='fahrer'){
     tabs=[{id:'fahrer',label:'FAHRTEN',badge:openP+openT},
           {id:'grid',label:'RASTER'},{id:'contacts',label:'KONTAKTE'}];
@@ -2330,6 +2689,9 @@ function EventShell({eventId,role,viewAs,setViewAs,onBack,onLogout,driverId}){
         {valid==='travel'  &&<Travel ev={ev} base={base} editable={editable||eff==='fahrer'}/>}
         {valid==='map'     &&<DriverPanel meta={meta} drivers={drivers}/>}
         {valid==='guests'  &&<Guests ev={ev} base={base}/>}
+        {valid==='kasse'   &&<Kasse ev={ev} base={base} role={eff}/>}
+        {valid==='payouts' &&<Payouts ev={ev} base={base} me={me}/>}
+        {valid==='settle'  &&<Abrechnung ev={ev} base={base} me={me} role={eff}/>}
         {valid==='contacts'&&<Contacts ev={ev} base={base} editable={editable}/>}
         {valid==='fahrer'  &&<FahrerPanel ev={ev} base={base} driverId={driverId}/>}
         {valid==='notes'   &&<Notes ev={ev} base={base} editable={editable}/>}
@@ -2751,7 +3113,7 @@ function App(){
   else if(creating) body=<NewEvent onCancel={()=>setCreating(false)} onCreated={id=>{setCreating(false);open(id);}}/>;
   else if(openId&&visible[openId])
     body=<EventShell eventId={openId} role={role} viewAs={viewAs} setViewAs={switchRole}
-      onBack={back} onLogout={logout} driverId={driverId}/>;
+      onBack={back} onLogout={logout} driverId={driverId} me={auth.user}/>;
   else body=<EventList events={visible} role={role} onOpen={open} onLogout={logout}
     canManage={role==='superadmin'||role==='leitung'} onCreate={()=>setCreating(true)}
     onSwitchRole={switchRole} onTeam={role==='superadmin'?()=>setShowTeam(true):null}
