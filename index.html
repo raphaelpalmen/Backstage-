@@ -611,6 +611,7 @@ function LoginScreen({onOffline,onInstall}){
     setBusy(true);setErr('');
     try{
       const cred=await fbAuth.createUserWithEmailAndPassword(f.email.trim(),f.password);
+      try{ await cred.user.updateProfile({displayName:f.name.trim()}); }catch(e){}
       await db.ref(`${USERS}/${cred.user.uid}`).set({uid:cred.user.uid,name:f.name.trim(),
         email:f.email.trim(),role:role||null,pending:role?null:true,
         wish:role?null:(f.wish||null),active:true,createdAt:Date.now()});
@@ -846,6 +847,8 @@ function SuperBar({onSwitchRole,active}){
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 /* Ist Leaflet wirklich einsatzbereit? */
 const hasLeaflet=()=>typeof L!=='undefined'&&L&&typeof L.map==='function';
+/* Ab wann gilt eine Ortung als eingefroren (Handy gesperrt / App im Hintergrund) */
+const STALE_MS=2*60*1000;
 /* Bei Bedarf zur Laufzeit nachladen — mehrere Quellen nacheinander */
 let _leafletTry=null;
 function loadLeaflet(){
@@ -935,9 +938,13 @@ function MapPanel({meta,drivers}){
         '📍 '+esc(meta.venueName||'Venue'),esc(meta.venueAddr),'#a1a1aa','<div style="width:2px;height:9px;background:#f472b6"></div>'));
       drivers.forEach(d=>{
         if(!d.active||!okCoord(d.lat,d.lng))return;
-        L.circle([+d.lat,+d.lng],{radius:110,color:'#3b82f6',weight:1,fillColor:'#3b82f6',fillOpacity:.13}).addTo(layer.current);
-        pin(d.lat,d.lng,bubble('#3b82f6','#fff','🚐 '+esc(d.name||'Fahrer'),
-          esc(ago(d.updatedAt)),'#93c5fd','<div class="drv-pin" style="margin-top:3px"></div>'));
+        const age=Date.now()-(d.updatedAt||0);
+        const stale=age>STALE_MS;                 // Ortung eingefroren?
+        const col=stale?'#a1a1aa':'#3b82f6';
+        L.circle([+d.lat,+d.lng],{radius:110,color:col,weight:1,fillColor:col,fillOpacity:stale?.06:.13}).addTo(layer.current);
+        pin(d.lat,d.lng,bubble(col,'#fff',(stale?'⏸ ':'🚐 ')+esc(d.name||'Fahrer'),
+          esc((stale?'zuletzt ':'')+ago(d.updatedAt)),stale?'#d4d4d8':'#93c5fd',
+          `<div class="drv-pin" style="margin-top:3px;background:${col};box-shadow:0 0 0 3px ${col}55"></div>`));
       });
       if(pts.length>1)map.current.fitBounds(L.latLngBounds(pts),{padding:[55,55],maxZoom:15});
       else if(pts.length===1)map.current.setView(pts[0],14);
@@ -964,13 +971,18 @@ function MapPanel({meta,drivers}){
 }
 
 function DriverPanel({meta,drivers}){
+  const [,tick]=useState(0);
+  useEffect(()=>{const t=setInterval(()=>tick(n=>n+1),20000);return()=>clearInterval(t);},[]);
   const active=drivers.filter(d=>d.active);
+  const live=active.filter(d=>Date.now()-(d.updatedAt||0)<=STALE_MS);
+  const frozen=active.length-live.length;
   return(
     <div className="flex flex-col h-full">
       <div className="flex-shrink-0 px-4 py-2.5 border-b border-zinc-800 flex items-center gap-2">
-        <span className={`w-2 h-2 rounded-full ${active.length?'bg-blue-400':'bg-zinc-700'}`}/>
+        <span className={`w-2 h-2 rounded-full ${live.length?'bg-blue-400':'bg-zinc-700'}`}/>
         <span className="mono text-[11px] text-zinc-400">
-          {active.length?`${active.length} Fahrer live`:'Kein Fahrer teilt gerade seinen Standort'}</span>
+          {active.length===0?'Kein Fahrer teilt gerade seinen Standort'
+            :`${live.length} live${frozen?` · ${frozen} pausiert`:''}`}</span>
       </div>
       {!okCoord(meta.hotelLat,meta.hotelLng)&&!okCoord(meta.venueLat,meta.venueLng)&&(
         <div className="flex-shrink-0 bg-amber-500/10 border-b border-amber-500/25 px-4 py-2.5">
@@ -983,18 +995,23 @@ function DriverPanel({meta,drivers}){
       <div className="flex-1 min-h-[300px]"><MapPanel meta={meta} drivers={drivers}/></div>
       <div className="flex-shrink-0 border-t border-zinc-800 max-h-[38%] overflow-y-auto safe-bot">
         {drivers.length===0&&<div className="px-4 py-5 text-zinc-700 mono text-xs text-center">Noch kein Fahrer eingeloggt.</div>}
-        {drivers.map(d=>(
+        {drivers.map(d=>{
+          const stale=Date.now()-(d.updatedAt||0)>STALE_MS;
+          return(
           <div key={d.id} className="flex items-center gap-3 px-4 py-3 border-b border-zinc-800/60">
-            <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${d.active?'bg-blue-400':'bg-zinc-700'}`}/>
+            <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${!d.active?'bg-zinc-700':stale?'bg-amber-400':'bg-blue-400'}`}/>
             <div className="flex-1 min-w-0">
               <div className="mono text-sm font-bold text-zinc-100 truncate">{d.name||'Fahrer'}</div>
-              <div className="mono text-[10px] text-zinc-500">{d.active?`aktualisiert ${ago(d.updatedAt)}`:'offline'}</div>
+              <div className={`mono text-[10px] ${!d.active?'text-zinc-500':stale?'text-amber-400/80':'text-zinc-500'}`}>
+                {!d.active?'offline'
+                  :stale?`⏸ pausiert · zuletzt ${ago(d.updatedAt)}`
+                  :`live · ${ago(d.updatedAt)}`}</div>
             </div>
             {d.active&&d.lat!=null&&(
               <a href={`https://www.google.com/maps/dir/?api=1&destination=${d.lat},${d.lng}`} target="_blank" rel="noopener"
                 className="mono text-[10px] text-blue-300 border border-blue-500/30 bg-blue-500/10 px-2.5 py-1.5 rounded-lg active:bg-blue-500/20">Route ↗</a>)}
-          </div>
-        ))}
+          </div>);
+        })}
         <div className="px-4 py-3 space-y-2">
           <a href={mapsUrl(meta.hotelAddr)} target="_blank" rel="noopener" className="block bg-zinc-900 border border-zinc-800 rounded-xl px-3.5 py-2.5 active:bg-zinc-800">
             <div className="mono text-[10px] text-zinc-500">🏨 HOTEL</div>
@@ -1463,21 +1480,51 @@ function FahrerPanel({ev,base,driverId}){
   const [name,setName]=useState(me.name||localStorage.getItem('uo-drivername')||'');
   const [on,setOn]=useState(!!me.active);
   const [err,setErr]=useState('');
-  const watch=useRef(null);
+  const [awake,setAwake]=useState(false);
+  const [fixes,setFixes]=useState(0);
+  const [lastFix,setLastFix]=useState(null);
+  const [,tick]=useState(0);
+  const watch=useRef(null),wake=useRef(null);
   useEffect(()=>{if(me.name&&!name)setName(me.name);},[me.name]);
-  useEffect(()=>()=>{if(watch.current!=null)navigator.geolocation.clearWatch(watch.current);},[]);
-  const start=()=>{
+  useEffect(()=>{const t=setInterval(()=>tick(n=>n+1),10000);return()=>clearInterval(t);},[]);
+  useEffect(()=>()=>{
+    if(watch.current!=null)navigator.geolocation.clearWatch(watch.current);
+    try{ wake.current&&wake.current.release(); }catch(e){}
+  },[]);
+  /* Nach dem Zurückholen aus dem Hintergrund die Bildschirmsperre neu anfordern */
+  useEffect(()=>{
+    const onVis=()=>{ if(document.visibilityState==='visible'&&on&&!wake.current)lockScreen(); };
+    document.addEventListener('visibilitychange',onVis);
+    return()=>document.removeEventListener('visibilitychange',onVis);
+  },[on]);
+  const start=async()=>{
     if(!navigator.geolocation){setErr('Gerät unterstützt kein GPS');return;}
     setErr('');
     watch.current=navigator.geolocation.watchPosition(
-      pos=>fbSet(`${base}/drivers/${driverId}`,{name:name.trim()||'Fahrer',active:true,
-        lat:pos.coords.latitude,lng:pos.coords.longitude,acc:Math.round(pos.coords.accuracy||0),updatedAt:Date.now()}),
-      e=>setErr(e.code===1?'Standortfreigabe verweigert — in den Browser-Einstellungen erlauben':'Standort nicht verfügbar'),
+      pos=>{ setFixes(n=>n+1); setLastFix(Date.now());
+        fbSet(`${base}/drivers/${driverId}`,{name:name.trim()||'Fahrer',active:true,
+          lat:pos.coords.latitude,lng:pos.coords.longitude,
+          acc:Math.round(pos.coords.accuracy||0),updatedAt:Date.now()}); },
+      e=>setErr(e.code===1?'Standortfreigabe verweigert — in den Einstellungen des Browsers erlauben'
+        :e.code===3?'Kein GPS-Empfang — versuche es weiter':'Standort nicht verfügbar'),
       {enableHighAccuracy:true,maximumAge:8000,timeout:20000});
     setOn(true);
+    lockScreen();
+  };
+  /* Display wachhalten — sonst pausiert der Browser die Standortabfrage */
+  const lockScreen=async()=>{
+    try{
+      if('wakeLock' in navigator){
+        wake.current=await navigator.wakeLock.request('screen');
+        setAwake(true);
+        wake.current.addEventListener('release',()=>setAwake(false));
+      }
+    }catch(e){ console.warn('WakeLock',e); setAwake(false); }
   };
   const stop=()=>{
     if(watch.current!=null){navigator.geolocation.clearWatch(watch.current);watch.current=null;}
+    try{ wake.current&&wake.current.release(); }catch(e){}
+    wake.current=null;setAwake(false);
     fbUpd(`${base}/drivers/${driverId}`,{active:false,updatedAt:Date.now()});setOn(false);
   };
   const days=meta.days||[];
@@ -1501,7 +1548,26 @@ function FahrerPanel({ev,base,driverId}){
           onBlur={()=>fbUpd(`${base}/drivers/${driverId}`,{name:name.trim()||'Fahrer'})}
           className="w-full mt-3 bg-zinc-900 border border-zinc-700 text-zinc-100 mono text-xs px-3 py-2 rounded-lg focus:border-blue-500 placeholder-zinc-700"/>
         {err&&<div className="mono text-[11px] text-red-400 mt-2">{err}</div>}
-        {on&&me.lat!=null&&<div className="mono text-[10px] text-blue-400/70 mt-2">{me.lat.toFixed(5)}, {me.lng.toFixed(5)} · ±{me.acc}m · {ago(me.updatedAt)}</div>}
+        {on&&(
+          <div className="mt-3 pt-3 border-t border-blue-500/20 space-y-1.5">
+            <div className="flex items-center gap-2">
+              <span className={`w-1.5 h-1.5 rounded-full ${lastFix&&Date.now()-lastFix<90000?'bg-emerald-400':'bg-amber-400'}`}/>
+              <span className="mono text-[10px] text-zinc-400">
+                {lastFix?`Letzte Ortung ${ago(lastFix)} · ${fixes} Aktualisierungen`:'warte auf erste Ortung…'}</span>
+            </div>
+            {me.lat!=null&&(
+              <div className="mono text-[10px] text-blue-400/70">{me.lat.toFixed(5)}, {me.lng.toFixed(5)} · ±{me.acc}m</div>)}
+            <div className="flex items-center gap-2">
+              <span className={`w-1.5 h-1.5 rounded-full ${awake?'bg-emerald-400':'bg-zinc-600'}`}/>
+              <span className="mono text-[10px] text-zinc-500">
+                {awake?'Display bleibt an, solange die App offen ist'
+                      :'Display-Sperre nicht möglich — bitte manuell offen lassen'}</span>
+            </div>
+            <div className="mono text-[10px] text-amber-300/80 leading-relaxed pt-1">
+              ⚠️ Der Standort läuft nur, solange die App im Vordergrund ist. Sperrst du das Handy
+              oder wechselst die App, pausiert die Ortung, bis du zurückkommst.
+            </div>
+          </div>)}
       </div>
       {next&&(
         <div className="rounded-xl border border-amber-500/40 bg-amber-500/[.07] px-4 py-3 mb-4">
@@ -3061,6 +3127,7 @@ function Team({me,onBack,events}){
     try{
       const wa=workerAuth();
       const cred=await wa.createUserWithEmailAndPassword(email,tmp);
+      try{ await cred.user.updateProfile({displayName:name}); }catch(e){}  // füllt %FIRST_NAME% in den Mails
       await db.ref(`${USERS}/${cred.user.uid}`).set({uid:cred.user.uid,name,email,role:f.role,
         active:true,mustSetPassword:true,createdAt:Date.now(),createdBy:me.name||me.email||'',
         allEvents:f.evAll?true:false, events:f.evAll?null:(Object.keys(f.evIds).length?f.evIds:null)});
@@ -3146,26 +3213,25 @@ function Team({me,onBack,events}){
             {msg&&msg.t==='ok'&&(
               <div className="rounded-lg px-3 py-3 border bg-emerald-500/10 border-emerald-500/30 space-y-2">
                 <div className="mono text-[12px] text-emerald-200 font-bold">{msg.name} ist angelegt.</div>
-                {msg.mailed?(
-                  <div className="mono text-[11px] text-emerald-200/90 leading-relaxed">
-                    📧 Eine E-Mail ist an <span className="font-bold">{msg.email}</span> unterwegs.
-                    <span className="block text-amber-300/90 mt-1">⚠️ Landet häufig im Spam — sag der Person, sie soll dort nachsehen.</span></div>
-                ):(
-                  <div className="mono text-[11px] text-amber-200 leading-relaxed">
-                    ⚠️ Die E-Mail konnte nicht verschickt werden. Gib die Einladung unten direkt weiter.</div>)}
+                <div className="mono text-[11px] text-zinc-300 leading-relaxed">
+                  Schick ihr jetzt die Zugangsdaten — das ist der sichere Weg:</div>
+                <button onClick={()=>shareInvite(msg.name,msg.email,msg.tmp)}
+                  className="w-full bg-emerald-500 text-black bebas text-lg py-3 rounded-lg tracking-wide active:scale-[.98]">
+                  ↗ EINLADUNG SENDEN</button>
                 <div className="mono text-[10px] text-zinc-400 bg-zinc-950/60 rounded px-2.5 py-2 leading-relaxed">
                   E-Mail: <span className="text-zinc-200">{msg.email}</span><br/>
                   Startpasswort: <span className="text-zinc-200">{msg.tmp}</span><br/>
                   Beim ersten Öffnen verlangt die App ein eigenes Passwort.</div>
-                <button onClick={()=>shareInvite(msg.name,msg.email,msg.tmp)}
-                  className="w-full bg-emerald-500 text-black mono text-[11px] font-bold py-2 rounded active:scale-[.98]">
-                  ↗ Einladung per WhatsApp / SMS senden</button>
                 <div className="flex gap-2">
                   <button onClick={()=>navigator.clipboard?.writeText(`backstage.app\n${location.href}\nE-Mail: ${msg.email}\nStartpasswort: ${msg.tmp}`)}
-                    className="flex-1 border border-emerald-500/40 text-emerald-300 mono text-[10px] py-1.5 rounded">Daten kopieren</button>
+                    className="flex-1 border border-zinc-600 text-zinc-300 mono text-[10px] py-1.5 rounded">Daten kopieren</button>
                   <button onClick={()=>resend(msg.email)}
-                    className="flex-1 border border-emerald-500/40 text-emerald-300 mono text-[10px] py-1.5 rounded">Mail nochmal</button>
+                    className="flex-1 border border-zinc-600 text-zinc-300 mono text-[10px] py-1.5 rounded">Mail schicken</button>
                 </div>
+                <div className="mono text-[10px] text-zinc-500 leading-relaxed">
+                  {msg.mailed
+                    ?'Zusätzlich ist eine Firebase-Mail unterwegs — die landet oft im Spam, verlass dich nicht darauf.'
+                    :'Die Firebase-Mail konnte nicht verschickt werden — nimm den Weg oben.'}</div>
               </div>)}
           </div>)}
 
