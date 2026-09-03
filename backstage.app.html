@@ -138,6 +138,10 @@ const fbOn  = (p,cb,onErr)=>{
   return ()=>r.off('value',h);
 };
 const fbOnce= (p)=> MODE==='local' ? Promise.resolve(_clone(_get(p))) : db.ref(p).once('value').then(s=>s.val());
+/* Zähler: atomar hochzählen, damit zwei Leute am Einlass sich nicht überschreiben */
+const fbInc = (p,d)=> MODE==='local'
+  ? (_set(p,Math.max(0,(Number(_get(p))||0)+d)),Promise.resolve())
+  : db.ref(p).transaction(v=>Math.max(0,(Number(v)||0)+d)).catch(rep('zählen',p));
 
 /* ── Konten (geteilt mit der alten App) ────────────────────────────── */
 const USERS = 'backstage/appUsers';
@@ -338,8 +342,9 @@ function buildSeed(){
     meta:{name:'UNREAL',date:'17.–18.07.2026',city:'Dortmund · Junkyard',
       days:['Fr 17.07','Sa 18.07'],
       floors:['Floor I Outdoor','Floor II Indoor','Floor III Indoor'],
-      hotelName:'Radisson Blu Hotel',hotelAddr:'Märkische Str. 31, 44141 Dortmund',hotelLat:51.5085,hotelLng:7.4685,
-      venueName:'Junkyard Club',venueAddr:'Ritterstr. 20, 44137 Dortmund',venueLat:51.5145,venueLng:7.4610,
+      /* Koordinaten per OpenStreetMap nachgeschlagen, nicht geschätzt */
+      hotelName:'Radisson Blu Hotel',hotelAddr:'Märkische Str. 31, 44141 Dortmund',hotelLat:51.50101,hotelLng:7.48239,
+      venueName:'Junkyard Club',venueAddr:'Ritterstr. 20, 44137 Dortmund',venueLat:51.51497,venueLng:7.45013,
       archived:false,createdAt:Date.now()},
     artists,pickups,notes};
 }
@@ -606,6 +611,7 @@ function LoginScreen({onOffline,onInstall}){
     setBusy(true);setErr('');
     try{
       const cred=await fbAuth.createUserWithEmailAndPassword(f.email.trim(),f.password);
+      try{ await cred.user.updateProfile({displayName:f.name.trim()}); }catch(e){}
       await db.ref(`${USERS}/${cred.user.uid}`).set({uid:cred.user.uid,name:f.name.trim(),
         email:f.email.trim(),role:role||null,pending:role?null:true,
         wish:role?null:(f.wish||null),active:true,createdAt:Date.now()});
@@ -841,6 +847,8 @@ function SuperBar({onSwitchRole,active}){
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 /* Ist Leaflet wirklich einsatzbereit? */
 const hasLeaflet=()=>typeof L!=='undefined'&&L&&typeof L.map==='function';
+/* Ab wann gilt eine Ortung als eingefroren (Handy gesperrt / App im Hintergrund) */
+const STALE_MS=2*60*1000;
 /* Bei Bedarf zur Laufzeit nachladen — mehrere Quellen nacheinander */
 let _leafletTry=null;
 function loadLeaflet(){
@@ -930,9 +938,13 @@ function MapPanel({meta,drivers}){
         '📍 '+esc(meta.venueName||'Venue'),esc(meta.venueAddr),'#a1a1aa','<div style="width:2px;height:9px;background:#f472b6"></div>'));
       drivers.forEach(d=>{
         if(!d.active||!okCoord(d.lat,d.lng))return;
-        L.circle([+d.lat,+d.lng],{radius:110,color:'#3b82f6',weight:1,fillColor:'#3b82f6',fillOpacity:.13}).addTo(layer.current);
-        pin(d.lat,d.lng,bubble('#3b82f6','#fff','🚐 '+esc(d.name||'Fahrer'),
-          esc(ago(d.updatedAt)),'#93c5fd','<div class="drv-pin" style="margin-top:3px"></div>'));
+        const age=Date.now()-(d.updatedAt||0);
+        const stale=age>STALE_MS;                 // Ortung eingefroren?
+        const col=stale?'#a1a1aa':'#3b82f6';
+        L.circle([+d.lat,+d.lng],{radius:110,color:col,weight:1,fillColor:col,fillOpacity:stale?.06:.13}).addTo(layer.current);
+        pin(d.lat,d.lng,bubble(col,'#fff',(stale?'⏸ ':'🚐 ')+esc(d.name||'Fahrer'),
+          esc((stale?'zuletzt ':'')+ago(d.updatedAt)),stale?'#d4d4d8':'#93c5fd',
+          `<div class="drv-pin" style="margin-top:3px;background:${col};box-shadow:0 0 0 3px ${col}55"></div>`));
       });
       if(pts.length>1)map.current.fitBounds(L.latLngBounds(pts),{padding:[55,55],maxZoom:15});
       else if(pts.length===1)map.current.setView(pts[0],14);
@@ -959,29 +971,47 @@ function MapPanel({meta,drivers}){
 }
 
 function DriverPanel({meta,drivers}){
+  const [,tick]=useState(0);
+  useEffect(()=>{const t=setInterval(()=>tick(n=>n+1),20000);return()=>clearInterval(t);},[]);
   const active=drivers.filter(d=>d.active);
+  const live=active.filter(d=>Date.now()-(d.updatedAt||0)<=STALE_MS);
+  const frozen=active.length-live.length;
   return(
     <div className="flex flex-col h-full">
       <div className="flex-shrink-0 px-4 py-2.5 border-b border-zinc-800 flex items-center gap-2">
-        <span className={`w-2 h-2 rounded-full ${active.length?'bg-blue-400':'bg-zinc-700'}`}/>
+        <span className={`w-2 h-2 rounded-full ${live.length?'bg-blue-400':'bg-zinc-700'}`}/>
         <span className="mono text-[11px] text-zinc-400">
-          {active.length?`${active.length} Fahrer live`:'Kein Fahrer teilt gerade seinen Standort'}</span>
+          {active.length===0?'Kein Fahrer teilt gerade seinen Standort'
+            :`${live.length} live${frozen?` · ${frozen} pausiert`:''}`}</span>
       </div>
+      {!okCoord(meta.hotelLat,meta.hotelLng)&&!okCoord(meta.venueLat,meta.venueLng)&&(
+        <div className="flex-shrink-0 bg-amber-500/10 border-b border-amber-500/25 px-4 py-2.5">
+          <div className="mono text-[11px] text-amber-200 leading-relaxed">
+            Für dieses Event sind noch keine Standorte hinterlegt — deshalb ist die Karte leer.</div>
+          <div className="mono text-[10px] text-zinc-400 mt-1 leading-relaxed">
+            Unter <span className="text-amber-300">EVENT → Hotel / Venue</span> die Adresse eintragen und auf
+            „📍 Koordinaten aus Adresse holen" tippen. Fahrer-Standorte erscheinen auch ohne das.</div>
+        </div>)}
       <div className="flex-1 min-h-[300px]"><MapPanel meta={meta} drivers={drivers}/></div>
       <div className="flex-shrink-0 border-t border-zinc-800 max-h-[38%] overflow-y-auto safe-bot">
         {drivers.length===0&&<div className="px-4 py-5 text-zinc-700 mono text-xs text-center">Noch kein Fahrer eingeloggt.</div>}
-        {drivers.map(d=>(
+        {drivers.map(d=>{
+          const stale=Date.now()-(d.updatedAt||0)>STALE_MS;
+          return(
           <div key={d.id} className="flex items-center gap-3 px-4 py-3 border-b border-zinc-800/60">
-            <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${d.active?'bg-blue-400':'bg-zinc-700'}`}/>
+            <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${!d.active?'bg-zinc-700':stale?'bg-amber-400':'bg-blue-400'}`}/>
             <div className="flex-1 min-w-0">
               <div className="mono text-sm font-bold text-zinc-100 truncate">{d.name||'Fahrer'}</div>
-              <div className="mono text-[10px] text-zinc-500">{d.active?`aktualisiert ${ago(d.updatedAt)}`:'offline'}</div>
+              <div className={`mono text-[10px] ${!d.active?'text-zinc-500':stale?'text-amber-400/80':'text-zinc-500'}`}>
+                {!d.active?'offline'
+                  :stale?`⏸ pausiert · zuletzt ${ago(d.updatedAt)}`
+                  :`live · ${ago(d.updatedAt)}`}</div>
             </div>
             {d.active&&d.lat!=null&&(
               <a href={`https://www.google.com/maps/dir/?api=1&destination=${d.lat},${d.lng}`} target="_blank" rel="noopener"
                 className="mono text-[10px] text-blue-300 border border-blue-500/30 bg-blue-500/10 px-2.5 py-1.5 rounded-lg active:bg-blue-500/20">Route ↗</a>)}
-          </div>
-        ))}
+          </div>);
+        })}
         <div className="px-4 py-3 space-y-2">
           <a href={mapsUrl(meta.hotelAddr)} target="_blank" rel="noopener" className="block bg-zinc-900 border border-zinc-800 rounded-xl px-3.5 py-2.5 active:bg-zinc-800">
             <div className="mono text-[10px] text-zinc-500">🏨 HOTEL</div>
@@ -1263,6 +1293,8 @@ function PickupSheet({p,meta,onClose,onSave,onDelete}){
 function Guests({ev,base}){
   const [which,setWhich]=useState('guestlist');
   const [q,setQ]=useState('');const [add,setAdd]=useState(false);
+  const [paying,setPaying]=useState(null);
+  const activeBlock=obj2arr(ev.kasse?.blocks).find(b=>!b.closedAt);
   const [nName,setNName]=useState('');const [nPlus,setNPlus]=useState('0');const [nNote,setNNote]=useState('');
   const path=`${base}/${which}`;
   const raw=obj2arr(ev[which]);
@@ -1315,19 +1347,93 @@ function Guests({ev,base}){
       )}
       <div className="flex-1 overflow-y-auto px-4 safe-bot">
         {rows.length===0&&<Empty>{q?'Niemanden gefunden.':'Noch keine Einträge.\nMit + hinzufügen.'}</Empty>}
-        {rows.map(g=><GuestRow key={g.id} g={g} path={path}/>)}
+        {rows.map(g=><GuestRow key={g.id} g={g} path={path}
+          isFriends={which==='friendslist'}
+          onCheckIn={()=>setPaying(g)}/>)}
       </div>
+      <PaySheet g={paying} price={activeBlock?.friendsPrice} open={!!paying}
+        onClose={()=>setPaying(null)}
+        onDone={(pay,qty,amount)=>{
+          fbUpd(`${path}/${paying.id}`,{checkedIn:true,inAt:Date.now(),
+            pay,qty,unitPrice:pay==='free'?0:(Number(activeBlock?.friendsPrice)||0),
+            amount,blockId:activeBlock?.id||null});
+          setPaying(null);
+        }}/>
     </div>
   );
 }
-function GuestRow({g,path}){
+/* Bar / EC / frei beim Einchecken auf der Friendslist */
+function PaySheet({g,price,open,onClose,onDone}){
+  const [qty,setQty]=useState(1);
+  useEffect(()=>{ if(g)setQty(1+(Number(g.plus)||0)); },[g]);
+  if(!open||!g)return null;
+  const p=Number(price)||0;
+  const total=p*qty;
+  const noPrice=!price&&price!==0;
+  const Btn=({pay,label,color,sub})=>(
+    <button onClick={()=>onDone(pay,qty,pay==='free'?0:total)}
+      className="flex-1 rounded-xl py-3.5 active:scale-[.97] transition-transform"
+      style={{background:color,color:'#09090b'}}>
+      <span className="block bebas text-xl tracking-wide leading-none">{label}</span>
+      <span className="block mono text-[10px] font-bold mt-0.5 opacity-70">{sub}</span>
+    </button>);
+  return(
+    <Sheet open={open} onClose={onClose} title={g.name||'Gast'}>
+      <div className="space-y-4">
+        {noPrice&&(
+          <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-3.5 py-2.5 mono text-[11px] text-amber-200 leading-relaxed">
+            Die Kasse ist noch nicht geöffnet — es ist kein Friendslist-Preis hinterlegt.
+            Du kannst trotzdem als „frei" einchecken.</div>)}
+
+        <div>
+          <div className="mono text-[10px] text-zinc-500 uppercase tracking-wider mb-2">Wie viele Personen?</div>
+          <div className="flex items-center gap-3">
+            <button onClick={()=>setQty(n=>Math.max(1,n-1))}
+              className="w-14 h-14 flex-shrink-0 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-200 text-2xl leading-none active:bg-zinc-700">−</button>
+            <div className="flex-1 min-w-0 text-center">
+              <div className="bebas text-4xl text-white leading-none">{qty}</div>
+              {(Number(g.plus)||0)>0&&<div className="mono text-[9px] text-zinc-600 mt-0.5">eingetragen: 1 +{g.plus}</div>}
+            </div>
+            <button onClick={()=>setQty(n=>n+1)}
+              className="w-14 h-14 flex-shrink-0 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-200 text-2xl leading-none active:bg-zinc-700">+</button>
+          </div>
+        </div>
+
+        {!noPrice&&(
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 px-4 py-3 flex items-baseline justify-between">
+            <span className="mono text-[11px] text-zinc-400">{qty} × {eur(p)}</span>
+            <span className="bebas text-3xl text-amber-400 leading-none">{eur(total)}</span>
+          </div>)}
+
+        <div>
+          <div className="mono text-[10px] text-zinc-500 uppercase tracking-wider mb-2">Wie bezahlt?</div>
+          <div className="flex gap-2">
+            <Btn pay="bar" label="BAR" color="#34d399" sub={noPrice?'':eur(total)}/>
+            <Btn pay="ec"  label="EC"  color="#60a5fa" sub={noPrice?'':eur(total)}/>
+          </div>
+          <button onClick={()=>onDone('free',qty,0)}
+            className="w-full mt-2 border border-zinc-700 text-zinc-400 mono text-xs py-2.5 rounded-xl active:bg-zinc-900">
+            Frei / Gast des Hauses</button>
+        </div>
+      </div>
+    </Sheet>
+  );
+}
+const PAYTAG={bar:{l:'BAR',c:'#34d399'},ec:{l:'EC',c:'#60a5fa'},free:{l:'FREI',c:'#71717a'}};
+function GuestRow({g,path,isFriends,onCheckIn}){
   const [ed,setEd]=useState(false);
   const [n,setN]=useState(g.name);const [p,setP]=useState(String(g.plus||0));const [nt,setNt]=useState(g.note||'');
   useEffect(()=>{setN(g.name);setP(String(g.plus||0));setNt(g.note||'');},[g.name,g.plus,g.note]);
   const save=()=>{fbUpd(`${path}/${g.id}`,{name:n,plus:+p||0,note:nt});setEd(false);};
+  const toggle=()=>{
+    if(g.checkedIn) fbUpd(`${path}/${g.id}`,{checkedIn:false,inAt:null,pay:null,qty:null,unitPrice:null,amount:null,blockId:null});
+    else if(isFriends) onCheckIn();
+    else fbUpd(`${path}/${g.id}`,{checkedIn:true,inAt:Date.now()});
+  };
+  const tag=g.checkedIn&&g.pay?PAYTAG[g.pay]:null;
   return(
     <div className={`flex items-center gap-3 py-2.5 border-b border-zinc-800/60 transition-all ${g.checkedIn?'opacity-45':''}`}>
-      <Check checked={!!g.checkedIn} onToggle={()=>fbUpd(`${path}/${g.id}`,{checkedIn:!g.checkedIn,inAt:!g.checkedIn?Date.now():null})} size={32}/>
+      <Check checked={!!g.checkedIn} onToggle={toggle} size={32}/>
       <div className="flex-1 min-w-0">
         {ed?(
           <div className="space-y-1.5">
@@ -1348,9 +1454,16 @@ function GuestRow({g,path}){
             <div className="flex items-center gap-1.5">
               <span className={`mono text-sm font-bold truncate ${g.checkedIn?'text-zinc-500 line-through':'text-zinc-100'}`}>{g.name}</span>
               {g.plus>0&&<span className="mono text-[11px] text-amber-500/80 flex-shrink-0">+{g.plus}</span>}
+              {tag&&<span className="mono text-[8px] font-bold px-1.5 py-0.5 rounded flex-shrink-0"
+                style={{color:tag.c,background:tag.c+'22',border:'1px solid '+tag.c+'55'}}>{tag.l}</span>}
             </div>
             {g.note&&<div className="mono text-[10px] text-zinc-600 truncate">{g.note}</div>}
-            {g.checkedIn&&g.inAt&&<div className="mono text-[9px] text-emerald-600">✓ {new Date(g.inAt).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})}</div>}
+            {g.checkedIn&&g.inAt&&(
+              <div className="mono text-[9px] text-emerald-600">
+                ✓ {new Date(g.inAt).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})}
+                {g.pay&&g.pay!=='free'&&<span className="text-zinc-500"> · {g.qty}× · {eur(g.amount)}</span>}
+                {g.pay==='free'&&<span className="text-zinc-500"> · {g.qty}× frei</span>}
+              </div>)}
           </>
         )}
       </div>
@@ -1367,21 +1480,51 @@ function FahrerPanel({ev,base,driverId}){
   const [name,setName]=useState(me.name||localStorage.getItem('uo-drivername')||'');
   const [on,setOn]=useState(!!me.active);
   const [err,setErr]=useState('');
-  const watch=useRef(null);
+  const [awake,setAwake]=useState(false);
+  const [fixes,setFixes]=useState(0);
+  const [lastFix,setLastFix]=useState(null);
+  const [,tick]=useState(0);
+  const watch=useRef(null),wake=useRef(null);
   useEffect(()=>{if(me.name&&!name)setName(me.name);},[me.name]);
-  useEffect(()=>()=>{if(watch.current!=null)navigator.geolocation.clearWatch(watch.current);},[]);
-  const start=()=>{
+  useEffect(()=>{const t=setInterval(()=>tick(n=>n+1),10000);return()=>clearInterval(t);},[]);
+  useEffect(()=>()=>{
+    if(watch.current!=null)navigator.geolocation.clearWatch(watch.current);
+    try{ wake.current&&wake.current.release(); }catch(e){}
+  },[]);
+  /* Nach dem Zurückholen aus dem Hintergrund die Bildschirmsperre neu anfordern */
+  useEffect(()=>{
+    const onVis=()=>{ if(document.visibilityState==='visible'&&on&&!wake.current)lockScreen(); };
+    document.addEventListener('visibilitychange',onVis);
+    return()=>document.removeEventListener('visibilitychange',onVis);
+  },[on]);
+  const start=async()=>{
     if(!navigator.geolocation){setErr('Gerät unterstützt kein GPS');return;}
     setErr('');
     watch.current=navigator.geolocation.watchPosition(
-      pos=>fbSet(`${base}/drivers/${driverId}`,{name:name.trim()||'Fahrer',active:true,
-        lat:pos.coords.latitude,lng:pos.coords.longitude,acc:Math.round(pos.coords.accuracy||0),updatedAt:Date.now()}),
-      e=>setErr(e.code===1?'Standortfreigabe verweigert — in den Browser-Einstellungen erlauben':'Standort nicht verfügbar'),
+      pos=>{ setFixes(n=>n+1); setLastFix(Date.now());
+        fbSet(`${base}/drivers/${driverId}`,{name:name.trim()||'Fahrer',active:true,
+          lat:pos.coords.latitude,lng:pos.coords.longitude,
+          acc:Math.round(pos.coords.accuracy||0),updatedAt:Date.now()}); },
+      e=>setErr(e.code===1?'Standortfreigabe verweigert — in den Einstellungen des Browsers erlauben'
+        :e.code===3?'Kein GPS-Empfang — versuche es weiter':'Standort nicht verfügbar'),
       {enableHighAccuracy:true,maximumAge:8000,timeout:20000});
     setOn(true);
+    lockScreen();
+  };
+  /* Display wachhalten — sonst pausiert der Browser die Standortabfrage */
+  const lockScreen=async()=>{
+    try{
+      if('wakeLock' in navigator){
+        wake.current=await navigator.wakeLock.request('screen');
+        setAwake(true);
+        wake.current.addEventListener('release',()=>setAwake(false));
+      }
+    }catch(e){ console.warn('WakeLock',e); setAwake(false); }
   };
   const stop=()=>{
     if(watch.current!=null){navigator.geolocation.clearWatch(watch.current);watch.current=null;}
+    try{ wake.current&&wake.current.release(); }catch(e){}
+    wake.current=null;setAwake(false);
     fbUpd(`${base}/drivers/${driverId}`,{active:false,updatedAt:Date.now()});setOn(false);
   };
   const days=meta.days||[];
@@ -1405,7 +1548,26 @@ function FahrerPanel({ev,base,driverId}){
           onBlur={()=>fbUpd(`${base}/drivers/${driverId}`,{name:name.trim()||'Fahrer'})}
           className="w-full mt-3 bg-zinc-900 border border-zinc-700 text-zinc-100 mono text-xs px-3 py-2 rounded-lg focus:border-blue-500 placeholder-zinc-700"/>
         {err&&<div className="mono text-[11px] text-red-400 mt-2">{err}</div>}
-        {on&&me.lat!=null&&<div className="mono text-[10px] text-blue-400/70 mt-2">{me.lat.toFixed(5)}, {me.lng.toFixed(5)} · ±{me.acc}m · {ago(me.updatedAt)}</div>}
+        {on&&(
+          <div className="mt-3 pt-3 border-t border-blue-500/20 space-y-1.5">
+            <div className="flex items-center gap-2">
+              <span className={`w-1.5 h-1.5 rounded-full ${lastFix&&Date.now()-lastFix<90000?'bg-emerald-400':'bg-amber-400'}`}/>
+              <span className="mono text-[10px] text-zinc-400">
+                {lastFix?`Letzte Ortung ${ago(lastFix)} · ${fixes} Aktualisierungen`:'warte auf erste Ortung…'}</span>
+            </div>
+            {me.lat!=null&&(
+              <div className="mono text-[10px] text-blue-400/70">{me.lat.toFixed(5)}, {me.lng.toFixed(5)} · ±{me.acc}m</div>)}
+            <div className="flex items-center gap-2">
+              <span className={`w-1.5 h-1.5 rounded-full ${awake?'bg-emerald-400':'bg-zinc-600'}`}/>
+              <span className="mono text-[10px] text-zinc-500">
+                {awake?'Display bleibt an, solange die App offen ist'
+                      :'Display-Sperre nicht möglich — bitte manuell offen lassen'}</span>
+            </div>
+            <div className="mono text-[10px] text-amber-300/80 leading-relaxed pt-1">
+              ⚠️ Der Standort läuft nur, solange die App im Vordergrund ist. Sperrst du das Handy
+              oder wechselst die App, pausiert die Ortung, bis du zurückkommst.
+            </div>
+          </div>)}
       </div>
       {next&&(
         <div className="rounded-xl border border-amber-500/40 bg-amber-500/[.07] px-4 py-3 mb-4">
@@ -2000,6 +2162,550 @@ function TravelSheet({t,onClose,onSave,onDelete}){
   );
 }
 
+/* ══ ABENDKASSE ══════════════════════════════════════════════════════ */
+const eur=n=>(Number(n)||0).toFixed(2).replace('.',',')+' €';
+/* Klicker nur für Abendkasse. Friendslist wird über die Namensliste abgerechnet. */
+const CNT=[
+  {k:'ecNorm', l:'EC',  pay:'ec',  c:'#60a5fa'},
+  {k:'barNorm',l:'Bar', pay:'bar', c:'#34d399'},
+];
+const blockSum=b=>{
+  const c=b.counts||{};
+  const p=Number(b.price)||0;
+  const ec=(Number(c.ecNorm)||0)*p;
+  const bar=(Number(c.barNorm)||0)*p;
+  const people=(Number(c.ecNorm)||0)+(Number(c.barNorm)||0);
+  return{ec,bar,total:ec+bar,people};
+};
+/* Einnahmen aus der Friendslist — aus den abgehakten Einträgen */
+const friendsTotals=ev=>{
+  let ec=0,bar=0,people=0,free=0,count=0;
+  obj2arr(ev.friendslist).forEach(g=>{
+    if(!g.checkedIn)return;
+    const qty=Number(g.qty)||1;
+    people+=qty;count++;
+    if(g.pay==='ec')ec+=Number(g.amount)||0;
+    else if(g.pay==='bar')bar+=Number(g.amount)||0;
+    else free+=qty;
+  });
+  return{ec,bar,total:ec+bar,people,free,count};
+};
+const kasseTotals=ev=>{
+  const blocks=obj2arr(ev.kasse?.blocks);
+  let ec=0,bar=0,people=0;
+  blocks.forEach(b=>{const s=blockSum(b);ec+=s.ec;bar+=s.bar;people+=s.people;});
+  const fr=friendsTotals(ev);
+  const payouts=obj2arr(ev.kasse?.payouts);
+  const out=payouts.reduce((s,p)=>s+(Number(p.amount)||0),0);
+  const tEc=ec+fr.ec, tBar=bar+fr.bar, total=tEc+tBar;
+  return{blocks,payouts,fr,kasseEc:ec,kasseBar:bar,kassePeople:people,
+    ec:tEc,bar:tBar,total,people:people+fr.people,out,cash:tBar-out,net:total-out};
+};
+
+function Kasse({ev,base,role}){
+  const meta=ev.meta||{};
+  const blocks=obj2arr(ev.kasse?.blocks).sort((a,b)=>(a.startedAt||0)-(b.startedAt||0));
+  const active=blocks.find(b=>!b.closedAt);
+  const [newPrice,setNewPrice]=useState(false);
+  const [np,setNp]=useState({label:'',price:'',friendsPrice:''});
+
+  const startBlock=(label,price,friendsPrice)=>{
+    const id='b'+Date.now();
+    fbSet(`${base}/kasse/blocks/${id}`,{label:label||'Preis 1',price:Number(price)||0,
+      friendsPrice:Number(friendsPrice)||0,startedAt:Date.now(),closedAt:null,
+      counts:{ecNorm:0,barNorm:0,ecFr:0,barFr:0}});
+  };
+  const switchPrice=()=>{
+    if(active)fbUpd(`${base}/kasse/blocks/${active.id}`,{closedAt:Date.now()});
+    startBlock(np.label||`Preis ${blocks.length+1}`,np.price,np.friendsPrice);
+    setNp({label:'',price:'',friendsPrice:''});setNewPrice(false);
+  };
+
+  if(!active)return(
+    <div className="px-4 pt-4 pb-24">
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4 space-y-3">
+        <div className="bebas text-xl text-white tracking-wide">Abendkasse starten</div>
+        <div className="mono text-[11px] text-zinc-500 leading-relaxed">
+          Leg die Preise für den Abend fest. Später kannst du jederzeit auf einen neuen Preis umstellen — der Zähler beginnt dann von vorn, das Vorherige bleibt gespeichert.</div>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Eintritt normal" value={np.price} onChange={v=>setNp(p=>({...p,price:v}))} placeholder="15" type="number"/>
+          <Field label="Friendslist" value={np.friendsPrice} onChange={v=>setNp(p=>({...p,friendsPrice:v}))} placeholder="10" type="number"/>
+        </div>
+        <Field label="Bezeichnung" value={np.label} onChange={v=>setNp(p=>({...p,label:v}))} placeholder="Normalpreis"/>
+        <button onClick={()=>startBlock(np.label||'Normalpreis',np.price,np.friendsPrice)}
+          className="w-full bg-emerald-500 text-black bebas text-xl py-3 rounded-xl tracking-widest active:scale-[.98]">
+          KASSE ÖFFNEN</button>
+      </div>
+      {blocks.length>0&&<div className="mt-5"><ClosedBlocks blocks={blocks} base={base} hasActive={false}/></div>}
+    </div>);
+
+  const s=blockSum(active);
+  const c=active.counts||{};
+  const fr=friendsTotals(ev);
+  return(
+    <div className="px-4 pt-4 pb-24">
+      {/* aktueller Preis */}
+      <div className="rounded-xl border border-amber-500/30 bg-amber-500/[.07] px-4 py-3 mb-4">
+        <div className="flex items-center gap-2">
+          <div className="flex-1 min-w-0">
+            <div className="mono text-[9px] text-amber-500/80 uppercase tracking-[.18em]">Aktueller Preis</div>
+            <div className="mono text-sm font-bold text-zinc-100 truncate">{active.label}</div>
+          </div>
+          <div className="text-right">
+            <div className="bebas text-2xl text-amber-400 leading-none">{eur(active.price)}</div>
+            <div className="mono text-[10px] text-zinc-500">Friends {eur(active.friendsPrice)}</div>
+          </div>
+        </div>
+        <div className="mono text-[10px] text-zinc-600 mt-1">
+          seit {new Date(active.startedAt).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})} Uhr</div>
+      </div>
+
+      {/* Zähler — nur Abendkasse */}
+      <div className="mono text-[9px] text-zinc-600 uppercase tracking-[.18em] mb-2">Abendkasse · {eur(active.price)} pro Person</div>
+      <div className="grid grid-cols-2 gap-2.5 mb-4">
+        {CNT.map(x=>{
+          const n=Number(c[x.k])||0;
+          return(
+            <div key={x.k} className="rounded-xl border bg-zinc-900/70 p-2.5 min-w-0" style={{borderColor:x.c+'44'}}>
+              <div className="flex items-baseline gap-1.5 mb-1">
+                <span className="mono text-[11px] font-bold" style={{color:x.c}}>{x.l}</span>
+                <span className="mono text-[9px] text-zinc-600 truncate">{eur(n*active.price)}</span>
+              </div>
+              <div className="bebas text-5xl leading-none text-center mb-2" style={{color:n?x.c:'#3f3f46'}}>{n}</div>
+              <div className="flex gap-2">
+                <button onClick={()=>fbInc(`${base}/kasse/blocks/${active.id}/counts/${x.k}`,-1)}
+                  className="flex-1 h-12 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 text-2xl leading-none active:bg-zinc-700">−</button>
+                <button onClick={()=>fbInc(`${base}/kasse/blocks/${active.id}/counts/${x.k}`,1)}
+                  className="flex-1 h-12 rounded-lg text-black text-2xl leading-none font-bold active:scale-95"
+                  style={{background:x.c}}>+</button>
+              </div>
+            </div>);
+        })}
+      </div>
+
+      {/* Friendslist läuft über die Namensliste */}
+      <div className="rounded-xl border border-violet-500/30 bg-violet-500/[.06] px-4 py-3 mb-4">
+        <div className="flex items-center gap-3">
+          <div className="flex-1 min-w-0">
+            <div className="mono text-[10px] font-bold text-violet-300">Friendslist · {eur(active.friendsPrice)} pro Person</div>
+            <div className="mono text-[10px] text-zinc-500 mt-0.5 leading-snug">
+              Kein Klicker — beim Abhaken im Tab GÄSTE gibst du Bar oder EC an, der Preis rechnet sich selbst.</div>
+          </div>
+          <div className="text-right flex-shrink-0">
+            <div className="bebas text-2xl text-violet-300 leading-none">{eur(fr.total)}</div>
+            <div className="mono text-[9px] text-zinc-600">{fr.people} Pers.{fr.free?` · ${fr.free} frei`:''}</div>
+          </div>
+        </div>
+        <div className="flex gap-4 mt-2 pt-2 border-t border-violet-500/20 mono text-[10px] text-zinc-500">
+          <span>EC {eur(fr.ec)}</span><span>Bar {eur(fr.bar)}</span>
+        </div>
+      </div>
+
+      {/* Zwischensumme */}
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 px-4 py-3 mb-4">
+        <div className="flex justify-between mono text-[11px] text-zinc-400 mb-1">
+          <span>Abendkasse EC</span><span>{eur(s.ec)}</span></div>
+        <div className="flex justify-between mono text-[11px] text-zinc-400 mb-2">
+          <span>Abendkasse Bar</span><span>{eur(s.bar)}</span></div>
+        <div className="flex justify-between items-baseline border-t border-zinc-800 pt-2">
+          <span className="mono text-[11px] text-zinc-300">Dieser Preisblock · {s.people} Gäste</span>
+          <span className="bebas text-2xl text-emerald-400">{eur(s.total)}</span></div>
+      </div>
+
+      <button onClick={()=>{setNp({label:'',price:String(active.price),friendsPrice:String(active.friendsPrice)});setNewPrice(true);}}
+        className="w-full border border-dashed border-zinc-700 text-zinc-400 mono text-xs py-3 rounded-xl active:bg-zinc-900 mb-5">
+        ↻ Neuer Preis — Zähler beginnt von vorn</button>
+
+      <ClosedBlocks blocks={blocks.filter(b=>b.closedAt)} base={base} hasActive={true}/>
+
+      <Sheet open={newPrice} onClose={()=>setNewPrice(false)} title="Neuer Preis">
+        <div className="space-y-3">
+          <div className="mono text-[11px] text-zinc-500 leading-relaxed">
+            Der laufende Block „{active.label}" wird abgeschlossen und mit {eur(s.total)} gespeichert.
+            Danach zählst du zum neuen Preis von vorne.</div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Eintritt normal" value={np.price} onChange={v=>setNp(p=>({...p,price:v}))} type="number"/>
+            <Field label="Friendslist" value={np.friendsPrice} onChange={v=>setNp(p=>({...p,friendsPrice:v}))} type="number"/>
+          </div>
+          <Field label="Bezeichnung" value={np.label} onChange={v=>setNp(p=>({...p,label:v}))} placeholder="z. B. Spätpreis ab 1 Uhr"/>
+          <button onClick={switchPrice}
+            className="w-full bg-amber-500 text-black bebas text-xl py-3 rounded-xl tracking-widest active:scale-[.98]">
+            UMSTELLEN</button>
+        </div>
+      </Sheet>
+    </div>
+  );
+}
+function ClosedBlocks({blocks,base,hasActive}){
+  const [edit,setEdit]=useState(null);
+  const done=blocks.filter(b=>b.closedAt);
+  if(!done.length)return null;
+  return(
+    <div>
+      <SectionLabel right={<span className="mono text-[9px] text-zinc-700">antippen zum Korrigieren</span>}>
+        Abgeschlossene Preisblöcke</SectionLabel>
+      <div className="space-y-2">
+        {done.map(b=>{const s=blockSum(b);
+          return(
+            <button key={b.id} onClick={()=>setEdit(b)}
+              className="w-full text-left rounded-xl border border-zinc-800 bg-zinc-900/40 px-3.5 py-2.5 active:bg-zinc-900">
+              <div className="flex items-center gap-2">
+                <div className="flex-1 min-w-0">
+                  <div className="mono text-[12px] font-bold text-zinc-300 truncate">{b.label}</div>
+                  <div className="mono text-[10px] text-zinc-600">
+                    {new Date(b.startedAt).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})}–
+                    {new Date(b.closedAt).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})} ·
+                    {eur(b.price)} · EC {b.counts?.ecNorm||0} · Bar {b.counts?.barNorm||0}</div>
+                </div>
+                <div className="mono text-sm font-bold text-zinc-200">{eur(s.total)}</div>
+                <span className="text-zinc-700 text-xs">✎</span>
+              </div>
+            </button>);})}
+      </div>
+      <BlockEdit b={edit} base={base} hasActive={hasActive} onClose={()=>setEdit(null)}/>
+    </div>);
+}
+/* Nachträglich korrigieren: Preis, Bezeichnung, Zählerstände */
+function BlockEdit({b,base,hasActive,onClose}){
+  const [f,setF]=useState({});
+  useEffect(()=>{ if(b)setF({label:b.label||'',price:String(b.price??''),friendsPrice:String(b.friendsPrice??''),
+    ecNorm:String(b.counts?.ecNorm??0),barNorm:String(b.counts?.barNorm??0)}); },[b]);
+  if(!b)return null;
+  const set=(k,v)=>setF(p=>({...p,[k]:v}));
+  const preview=blockSum({price:Number(f.price)||0,counts:{ecNorm:Number(f.ecNorm)||0,barNorm:Number(f.barNorm)||0}});
+  const save=()=>{
+    fbUpd(`${base}/kasse/blocks/${b.id}`,{
+      label:f.label.trim()||b.label,
+      price:Number(f.price)||0,
+      friendsPrice:Number(f.friendsPrice)||0,
+      counts:{ecNorm:Math.max(0,Number(f.ecNorm)||0),barNorm:Math.max(0,Number(f.barNorm)||0)},
+      editedAt:Date.now()});
+    onClose();
+  };
+  const Stepper=({label,k,color})=>(
+    <div className="rounded-xl border bg-zinc-900/70 p-2.5 min-w-0" style={{borderColor:color+'44'}}>
+      <div className="mono text-[11px] font-bold mb-2" style={{color}}>{label}</div>
+      <input value={f[k]} onChange={e=>set(k,e.target.value.replace(/\D/g,''))} inputMode="numeric"
+        className="w-full bg-zinc-800 border border-zinc-700 text-white bebas text-3xl text-center py-1.5 rounded-lg mb-2"/>
+      <div className="flex gap-2">
+        <button onClick={()=>set(k,String(Math.max(0,(Number(f[k])||0)-1)))}
+          className="flex-1 h-10 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 text-xl leading-none active:bg-zinc-700">−</button>
+        <button onClick={()=>set(k,String((Number(f[k])||0)+1))}
+          className="flex-1 h-10 rounded-lg text-black text-xl leading-none font-bold active:scale-95"
+          style={{background:color}}>+</button>
+      </div>
+    </div>);
+  return(
+    <Sheet open={!!b} onClose={onClose} title="Preisblock korrigieren"
+      onDelete={()=>{if(confirm(`Block „${b.label}" mit allen Zählerständen löschen?`)){fbDel(`${base}/kasse/blocks/${b.id}`);onClose();}}}>
+      <div className="space-y-3">
+        <div className="mono text-[10px] text-zinc-500 leading-relaxed">
+          {new Date(b.startedAt).toLocaleString('de-DE')} – {new Date(b.closedAt).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})} Uhr
+          {b.editedAt&&<span className="block text-amber-500/70">zuletzt korrigiert {new Date(b.editedAt).toLocaleString('de-DE')}</span>}
+        </div>
+        <Field label="Bezeichnung" value={f.label} onChange={v=>set('label',v)}/>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Eintritt normal" value={f.price} onChange={v=>set('price',v)} type="number"/>
+          <Field label="Friendslist" value={f.friendsPrice} onChange={v=>set('friendsPrice',v)} type="number"/>
+        </div>
+        <div className="mono text-[10px] text-zinc-500 uppercase tracking-wider pt-1">Zählerstände</div>
+        <div className="grid grid-cols-2 gap-2.5">
+          <Stepper label="EC" k="ecNorm" color="#60a5fa"/>
+          <Stepper label="Bar" k="barNorm" color="#34d399"/>
+        </div>
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 px-4 py-3 flex justify-between items-baseline">
+          <span className="mono text-[11px] text-zinc-400">neue Summe · {preview.people} Gäste</span>
+          <span className="bebas text-2xl text-emerald-400">{eur(preview.total)}</span>
+        </div>
+        <button onClick={save}
+          className="w-full bg-amber-500 text-black bebas text-xl py-3 rounded-xl tracking-widest active:scale-[.98]">SPEICHERN</button>
+        {!hasActive&&(
+          <button onClick={()=>{fbUpd(`${base}/kasse/blocks/${b.id}`,{closedAt:null});onClose();}}
+            className="w-full border border-zinc-700 text-zinc-400 mono text-xs py-2.5 rounded-xl active:bg-zinc-900">
+            Block wieder öffnen und weiterzählen</button>)}
+        <div className="mono text-[9px] text-zinc-600 leading-relaxed">
+          Die Friendslist wird nicht über diese Zähler abgerechnet — dort korrigierst du direkt beim Gast im Tab GÄSTE.
+        </div>
+      </div>
+    </Sheet>
+  );
+}
+
+/* ══ AUSZAHLUNGEN ════════════════════════════════════════════════════ */
+function Payouts({ev,base,me}){
+  const [f,setF]=useState({label:'',amount:'',note:''});
+  const list=obj2arr(ev.kasse?.payouts).sort((a,b)=>(b.at||0)-(a.at||0));
+  const sum=list.reduce((s,p)=>s+(Number(p.amount)||0),0);
+  const add=()=>{
+    if(!f.label.trim()||!(Number(f.amount)>0))return;
+    fbPush(`${base}/kasse/payouts`,{label:f.label.trim(),amount:Number(f.amount),
+      note:f.note.trim(),by:me?.name||me?.email||'Einlass',at:Date.now()});
+    setF({label:'',amount:'',note:''});
+  };
+  return(
+    <div className="px-4 pt-4 pb-24">
+      <div className="rounded-xl border border-red-500/25 bg-red-500/[.06] px-4 py-3 mb-4 flex items-center">
+        <div className="flex-1">
+          <div className="mono text-[9px] text-red-400/80 uppercase tracking-[.18em]">Aus der Kasse gezahlt</div>
+          <div className="mono text-[10px] text-zinc-600 mt-0.5">{list.length} Belege</div>
+        </div>
+        <div className="bebas text-3xl text-red-400 leading-none">−{eur(sum)}</div>
+      </div>
+
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 mb-4 space-y-2">
+        <div className="mono text-[10px] text-zinc-500 uppercase tracking-wider">Neue Auszahlung</div>
+        <div className="flex gap-2">
+          <input value={f.label} onChange={e=>setF(p=>({...p,label:e.target.value}))} placeholder="Wofür? z. B. Security"
+            className="flex-1 bg-zinc-800 border border-zinc-700 text-white mono text-sm px-3 py-2.5 rounded-lg focus:border-amber-500 placeholder-zinc-600"/>
+          <input value={f.amount} onChange={e=>setF(p=>({...p,amount:e.target.value}))} placeholder="0,00" type="number" inputMode="decimal"
+            className="w-24 bg-zinc-800 border border-zinc-700 text-white mono text-sm px-3 py-2.5 rounded-lg focus:border-amber-500 placeholder-zinc-600 text-right"/>
+        </div>
+        <div className="flex gap-2">
+          <input value={f.note} onChange={e=>setF(p=>({...p,note:e.target.value}))} onKeyDown={e=>e.key==='Enter'&&add()}
+            placeholder="Belegnummer / Notiz (optional)"
+            className="flex-1 bg-zinc-800 border border-zinc-700 text-white mono text-xs px-3 py-2.5 rounded-lg focus:border-amber-500 placeholder-zinc-600"/>
+          <button onClick={add} className="bg-amber-500 text-black mono text-xs font-bold px-5 rounded-lg active:scale-95">+</button>
+        </div>
+      </div>
+
+      <SectionLabel>Belege</SectionLabel>
+      <div className="space-y-2">
+        {list.length===0&&<Empty>Noch keine Auszahlungen.</Empty>}
+        {list.map(p=>(
+          <div key={p.id} className="rounded-xl border border-zinc-800 bg-zinc-900/60 px-3.5 py-3 flex items-start gap-3">
+            <div className="flex-1 min-w-0">
+              <div className="mono text-[13px] font-bold text-zinc-100 truncate">{p.label}</div>
+              {p.note&&<div className="mono text-[10px] text-zinc-500 truncate">{p.note}</div>}
+              <div className="mono text-[9px] text-zinc-600 mt-0.5">
+                {p.by} · {p.at?new Date(p.at).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'}):''} Uhr</div>
+            </div>
+            <div className="mono text-sm font-bold text-red-400 flex-shrink-0">−{eur(p.amount)}</div>
+            <button onClick={()=>{if(confirm(`"${p.label}" löschen?`))fbDel(`${base}/kasse/payouts/${p.id}`);}}
+              className="text-zinc-700 mono text-xs active:text-red-400 flex-shrink-0">✕</button>
+          </div>))}
+      </div>
+    </div>
+  );
+}
+
+/* ══ ABRECHNUNG ══════════════════════════════════════════════════════ */
+function Abrechnung({ev,base,me,role}){
+  const meta=ev.meta||{};
+  const t=kasseTotals(ev);
+  const canConfirm=role==='leitung'||role==='superadmin';
+  const guests=obj2arr(ev.guestlist).filter(g=>g.checkedIn).length;
+  const friends=obj2arr(ev.friendslist).filter(g=>g.checkedIn).length;
+
+  /* Versandhistorie — jeder Versand bleibt erhalten */
+  const sent=obj2arr(ev.kasse?.settlements).sort((a,b)=>(a.confirmedAt||0)-(b.confirmedAt||0));
+  const legacy=ev.kasse?.settlement;
+  const history=sent.length?sent:(legacy?[{id:'alt',...legacy,no:1}]:[]);
+  const last=history.length?history[history.length-1]:null;
+
+  /* Hat sich seit dem letzten Versand etwas geändert? */
+  const FIELDS=[['total','Einnahmen'],['ec','EC'],['bar','Bar'],['out','Auszahlungen'],
+                ['cash','Bargeld'],['people','Gäste']];
+  const diffs=last?FIELDS.map(([k,l])=>({k,l,alt:Number(last[k])||0,neu:Number(t[k])||0}))
+    .filter(d=>Math.abs(d.alt-d.neu)>0.001):[];
+  const changed=diffs.length>0;
+
+  const nextNo=history.length+1;
+  const text=useMemo(()=>{
+    const L=[];
+    L.push(`ABRECHNUNG — ${meta.name||'Event'}`);
+    L.push(`${meta.date||''} · ${meta.city||''}`);
+    if(last){
+      L.push('');
+      L.push(`*** KORRIGIERTE FASSUNG Nr. ${nextNo} ***`);
+      L.push(`Ersetzt die Abrechnung vom ${new Date(last.confirmedAt).toLocaleString('de-DE')}.`);
+      if(diffs.length){
+        L.push('Geändert hat sich:');
+        diffs.forEach(d=>L.push(`  ${d.l}: ${d.k==='people'?d.alt:eur(d.alt)} → ${d.k==='people'?d.neu:eur(d.neu)}`));
+      }
+    }
+    L.push('');
+    L.push('ABENDKASSE (Klicker)');
+    t.blocks.forEach(b=>{const s=blockSum(b);const cc=b.counts||{};
+      L.push(`  ${b.label} — ${eur(b.price)} p. P.`);
+      L.push(`    EC  ${cc.ecNorm||0} × = ${eur(s.ec)}`);
+      L.push(`    Bar ${cc.barNorm||0} × = ${eur(s.bar)}`);
+      L.push(`    Summe ${eur(s.total)} · ${s.people} Gäste`);});
+    L.push(`  Abendkasse gesamt  ${eur(t.kasseEc+t.kasseBar)} · ${t.kassePeople} Gäste`);
+    L.push('');
+    L.push('FRIENDSLIST (Namensliste)');
+    L.push(`  EC   ${eur(t.fr.ec)}`);
+    L.push(`  Bar  ${eur(t.fr.bar)}`);
+    L.push(`  Summe ${eur(t.fr.total)} · ${t.fr.people} Personen auf ${t.fr.count} Einträgen`);
+    if(t.fr.free)L.push(`  davon frei: ${t.fr.free} Personen`);
+    L.push('');
+    L.push(`EINNAHMEN EC    ${eur(t.ec)}`);
+    L.push(`EINNAHMEN BAR   ${eur(t.bar)}`);
+    L.push(`GESAMT          ${eur(t.total)}`);
+    L.push(`Zahlende Gäste  ${t.people}`);
+    L.push('');
+    L.push('AUSZAHLUNGEN');
+    if(!t.payouts.length)L.push('  keine');
+    t.payouts.forEach(p=>L.push(`  ${p.label}${p.note?' ('+p.note+')':''}  −${eur(p.amount)}  [${p.by}]`));
+    L.push(`  Summe        −${eur(t.out)}`);
+    L.push('');
+    L.push(`BARGELD ZUR ÜBERGABE  ${eur(t.cash)}`);
+    L.push(`NETTO GESAMT          ${eur(t.net)}`);
+    L.push('');
+    L.push(`Eingecheckt: Gästeliste ${guests} · Friendslist ${friends}`);
+    L.push('');
+    L.push(`Bestätigt von ${me?.name||me?.email||''} am ${new Date().toLocaleString('de-DE')}`);
+    if(last)L.push(`Fassung Nr. ${nextNo}`);
+    return L.join('\n');
+  },[JSON.stringify([ev.kasse,meta,guests,friends,last?.confirmedAt])]);
+
+  const confirmSend=()=>{
+    const to=(meta.settleEmail||'').trim();
+    if(!to){alert('Es ist keine Empfängeradresse hinterlegt.\n\nDie Leitung trägt sie unter EVENT → Abrechnung ein.');return;}
+    const now=Date.now();
+    fbSet(`${base}/kasse/settlements/s${now}`,{no:nextNo,confirmedBy:me?.name||me?.email||'',
+      confirmedAt:now,sentTo:to,ec:t.ec,bar:t.bar,total:t.total,out:t.out,cash:t.cash,
+      net:t.net,people:t.people,text,
+      corrects:last?(last.no||1):null});
+    const subj=`${last?`Abrechnung KORRIGIERT (Nr. ${nextNo})`:'Abrechnung'} ${meta.name||'Event'} — ${meta.date||''}`;
+    window.location.href=`mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(text)}`;
+  };
+
+  const Row=({l,v,strong,neg})=>(
+    <div className={`flex justify-between items-baseline ${strong?'border-t border-zinc-800 pt-2 mt-2':''}`}>
+      <span className={`mono ${strong?'text-[12px] text-zinc-200':'text-[11px] text-zinc-500'}`}>{l}</span>
+      <span className={strong?`bebas text-2xl ${neg?'text-red-400':'text-emerald-400'}`:`mono text-[12px] ${neg?'text-red-400':'text-zinc-300'}`}>
+        {neg?'−':''}{eur(v)}</span>
+    </div>);
+
+  return(
+    <div className="px-4 pt-4 pb-24">
+      {last&&!changed&&(
+        <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 mb-4">
+          <div className="mono text-[11px] text-emerald-200 leading-relaxed">
+            ✓ Abrechnung verschickt{history.length>1?` (Fassung ${last.no||history.length})`:''}<br/>
+            <span className="text-emerald-200/70">{last.confirmedBy} · {new Date(last.confirmedAt).toLocaleString('de-DE')} · an {last.sentTo}</span><br/>
+            <span className="text-emerald-200/70">Stimmt mit den aktuellen Zahlen überein.</span></div>
+        </div>)}
+
+      {last&&changed&&(
+        <div className="rounded-xl border border-amber-500/50 bg-amber-500/10 px-4 py-3 mb-4">
+          <div className="mono text-[12px] text-amber-200 font-bold mb-1.5">
+            ⚠️ Zahlen haben sich seit dem Versand geändert</div>
+          <div className="mono text-[10px] text-zinc-400 mb-2">
+            Verschickt {new Date(last.confirmedAt).toLocaleString('de-DE')} von {last.confirmedBy}.
+            Die Empfängerin hat noch die alten Zahlen.</div>
+          <div className="space-y-0.5">
+            {diffs.map(d=>(
+              <div key={d.k} className="flex justify-between mono text-[11px]">
+                <span className="text-zinc-400">{d.l}</span>
+                <span>
+                  <span className="text-zinc-600 line-through">{d.k==='people'?d.alt:eur(d.alt)}</span>
+                  <span className="text-amber-300 font-bold"> → {d.k==='people'?d.neu:eur(d.neu)}</span>
+                </span>
+              </div>))}
+          </div>
+          <div className="mono text-[10px] text-amber-300/80 mt-2 leading-relaxed">
+            Schick die Abrechnung nochmal — sie geht als korrigierte Fassung Nr. {nextNo} raus,
+            mit einer Auflistung, was sich geändert hat.</div>
+        </div>)}
+
+      <SectionLabel>Abendkasse</SectionLabel>
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 px-4 py-3 mb-3">
+        <Row l="EC" v={t.kasseEc}/>
+        <Row l="Bar" v={t.kasseBar}/>
+        <div className="mono text-[10px] text-zinc-600 mt-1">
+          {t.kassePeople} Gäste in {t.blocks.length} Preisblock{t.blocks.length===1?'':'en'}</div>
+      </div>
+
+      <SectionLabel>Friendslist</SectionLabel>
+      <div className="rounded-xl border border-violet-500/25 bg-violet-500/[.05] px-4 py-3 mb-3">
+        <Row l="EC" v={t.fr.ec}/>
+        <Row l="Bar" v={t.fr.bar}/>
+        <div className="mono text-[10px] text-zinc-600 mt-1">
+          {t.fr.people} Personen auf {t.fr.count} Einträgen{t.fr.free?` · ${t.fr.free} frei`:''}</div>
+      </div>
+
+      <SectionLabel>Einnahmen gesamt</SectionLabel>
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 px-4 py-3 mb-4">
+        <Row l="EC-Zahlungen" v={t.ec}/>
+        <Row l="Barzahlungen" v={t.bar}/>
+        <div className="mono text-[10px] text-zinc-600 mt-1">{t.people} zahlende Gäste</div>
+        <Row l="Einnahmen gesamt" v={t.total} strong/>
+      </div>
+
+      <SectionLabel>Auszahlungen</SectionLabel>
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 px-4 py-3 mb-4">
+        {t.payouts.length===0&&<div className="mono text-[11px] text-zinc-600">keine</div>}
+        {t.payouts.map(p=>(
+          <div key={p.id} className="flex justify-between mono text-[11px] mb-1">
+            <span className="text-zinc-500 truncate pr-2">{p.label}</span>
+            <span className="text-red-400 flex-shrink-0">−{eur(p.amount)}</span></div>))}
+        <Row l="Auszahlungen gesamt" v={t.out} strong neg/>
+      </div>
+
+      <SectionLabel>Ergebnis</SectionLabel>
+      <div className="rounded-xl border border-amber-500/30 bg-amber-500/[.07] px-4 py-3.5 mb-4">
+        <div className="flex justify-between items-baseline mb-2">
+          <span className="mono text-[12px] text-zinc-200">Bargeld zur Übergabe</span>
+          <span className="bebas text-3xl text-amber-400">{eur(t.cash)}</span></div>
+        <div className="mono text-[10px] text-zinc-500 leading-relaxed mb-2">
+          Barzahlungen minus Auszahlungen — dieser Betrag muss in der Kasse liegen.</div>
+        <div className="flex justify-between items-baseline border-t border-amber-500/20 pt-2">
+          <span className="mono text-[11px] text-zinc-400">Netto gesamt (EC + Bar − Auszahlungen)</span>
+          <span className="mono text-sm font-bold text-zinc-100">{eur(t.net)}</span></div>
+      </div>
+
+      <details className="mb-4">
+        <summary className="mono text-[11px] text-zinc-500 py-2 cursor-pointer">Vollständige Abrechnung ansehen</summary>
+        <pre className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 mono text-[10px] text-zinc-300 overflow-x-auto whitespace-pre-wrap leading-relaxed mt-1">{text}</pre>
+      </details>
+
+      {canConfirm?(
+        <div className="space-y-2">
+          <div className="mono text-[10px] text-zinc-500 leading-relaxed">
+            Empfänger: <span className="text-zinc-300">{meta.settleEmail||'— noch keiner hinterlegt —'}</span>
+          </div>
+          <button onClick={confirmSend}
+            className={`w-full bebas text-xl py-3.5 rounded-xl tracking-widest active:scale-[.98]
+              ${changed?'bg-amber-500 text-black':'bg-emerald-500 text-black'}`}>
+            {!last?'BESTÄTIGEN & SENDEN'
+              :changed?`KORRIGIERTE FASSUNG ${nextNo} SENDEN`
+              :'NOCHMAL SENDEN'}</button>
+          <button onClick={()=>navigator.clipboard?.writeText(text)}
+            className="w-full border border-zinc-700 text-zinc-400 mono text-xs py-2.5 rounded-xl active:bg-zinc-900">
+            Abrechnung kopieren</button>
+          <div className="mono text-[10px] text-zinc-600 leading-relaxed pt-1">
+            Beim Bestätigen wird die Abrechnung gespeichert und dein Mailprogramm mit fertiger Nachricht geöffnet — du musst dort nur noch auf Senden tippen.
+            Jeder Versand bleibt gespeichert, du kannst also jederzeit korrigieren und neu schicken.</div>
+
+          {history.length>0&&(
+            <details className="pt-2">
+              <summary className="mono text-[11px] text-zinc-500 py-1.5 cursor-pointer">
+                Versandverlauf ({history.length})</summary>
+              <div className="space-y-1.5 mt-1.5">
+                {[...history].reverse().map((h,i)=>(
+                  <div key={h.id} className="rounded-lg border border-zinc-800 bg-zinc-900/50 px-3 py-2">
+                    <div className="flex justify-between items-baseline">
+                      <span className="mono text-[11px] text-zinc-300">
+                        Fassung {h.no||history.length-i}{h.corrects?` (Korrektur von ${h.corrects})`:''}</span>
+                      <span className="mono text-[11px] text-zinc-400">{eur(h.total)}</span>
+                    </div>
+                    <div className="mono text-[9px] text-zinc-600">
+                      {h.confirmedBy} · {new Date(h.confirmedAt).toLocaleString('de-DE')}</div>
+                  </div>))}
+              </div>
+            </details>)}
+        </div>
+      ):(
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-4 py-3 mono text-[11px] text-zinc-500 leading-relaxed">
+          {changed
+            ?<>Du hast nach dem Versand noch etwas korrigiert. Sag der Abendleitung Bescheid, damit sie die Abrechnung nochmal schickt.</>
+            :<>Die Abendleitung bestätigt und verschickt die Abrechnung. Zähl in Ruhe fertig — hier siehst du jederzeit den Stand.</>}
+        </div>)}
+    </div>
+  );
+}
+
 /* ══ KONTAKTE · als Kontaktkarte (.vcf) speicherbar ══════════════════ */
 const telClean=p=>String(p||'').replace(/[^\d+]/g,'');
 const vcard=(c,evName)=>{
@@ -2175,6 +2881,185 @@ function Notes({ev,base,editable}){
   );
 }
 
+/* ══ ADRESSE → KOORDINATEN (OpenStreetMap) ═══════════════════════════ */
+const nomi=async q=>{
+  const url='https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=de,at,ch,nl,be&q='+encodeURIComponent(q);
+  const r=await fetch(url,{headers:{Accept:'application/json'}});
+  if(!r.ok)throw new Error('Suchdienst antwortet nicht ('+r.status+')');
+  const j=await r.json();
+  return j.length?{lat:parseFloat(j[0].lat),lng:parseFloat(j[0].lon),name:j[0].display_name}:null;
+};
+/* Mehrere Schreibweisen nacheinander probieren — Adresse allein trifft am besten,
+   der Ortsname als Zusatz lässt die Suche dagegen oft ins Leere laufen. */
+async function geocode(addr,name){
+  const a=(addr||'').trim(), n=(name||'').trim();
+  const noHnr=a.replace(/(\d+)[a-zA-Z](?![\wäöüß])/,'$1');   // "2A" → "2", lässt "50679 Köln" in Ruhe
+  const noStreetNr=a.replace(/\s+\d+[a-zA-Z]?(?=\s*,)/,'');  // Hausnummer weg, PLZ bleibt
+  const tries=[a, noHnr, n&&a?`${n}, ${a}`:'', n, noStreetNr]
+    .map(s=>(s||'').trim()).filter((s,i,arr)=>s&&arr.indexOf(s)===i);
+  let lastErr=null;
+  for(const q of tries){
+    try{ const r=await nomi(q); if(r)return{...r,used:q}; }
+    catch(e){ lastErr=e; }
+    await new Promise(r=>setTimeout(r,350));                  // freundlich zum Dienst
+  }
+  if(lastErr)throw lastErr;
+  throw new Error('Adresse nicht gefunden');
+}
+/* Ein Ort: Name, Adresse, Koordinaten – mit automatischer Suche */
+function LocationBlock({icon,title,name,addr,lat,lng,onSet}){
+  const [busy,setBusy]=useState(false);
+  const [msg,setMsg]=useState(null);
+  const ok=Number.isFinite(+lat)&&Number.isFinite(+lng);
+  const find=async()=>{
+    if(!(addr||'').trim()&&!(name||'').trim()){setMsg({t:'err',m:'Trag zuerst die Adresse ein.'});return;}
+    setBusy(true);setMsg(null);
+    try{
+      const r=await geocode(addr,name);
+      onSet({lat:r.lat,lng:r.lng});
+      setMsg({t:'ok',m:'Gefunden: '+r.name});
+    }catch(e){
+      setMsg({t:'err',m:(e.message||String(e))+
+        ' — prüf die Schreibweise, oder trag die Zahlen unten von Hand ein.'});
+    }
+    finally{ setBusy(false); }
+  };
+  return(
+    <div className="space-y-3">
+      <Field label="Name" value={name} onChange={v=>onSet({name:v})}/>
+      <Field label="Adresse" value={addr} onChange={v=>onSet({addr:v})} placeholder="Straße Hausnummer, PLZ Ort"/>
+      <button onClick={find} disabled={busy}
+        className={`w-full mono text-xs py-2.5 rounded-xl border transition-all
+          ${busy?'border-zinc-800 text-zinc-600':'border-amber-500/40 bg-amber-500/10 text-amber-400 active:bg-amber-500/20'}`}>
+        {busy?'suche…':'📍 Koordinaten aus Adresse holen'}</button>
+      {msg&&(
+        <div className={`mono text-[10px] leading-relaxed ${msg.t==='ok'?'text-emerald-400':'text-amber-300'}`}>{msg.m}</div>)}
+      <div className="flex items-center gap-2">
+        <span className={`w-2 h-2 rounded-full flex-shrink-0 ${ok?'bg-emerald-500':'bg-red-500'}`}/>
+        <span className="mono text-[10px] text-zinc-500 flex-1">
+          {ok?`${(+lat).toFixed(5)}, ${(+lng).toFixed(5)} — erscheint auf der Karte`:'Noch kein Standort — dieser Punkt fehlt auf der Karte'}</span>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Lat (manuell)" value={lat} onChange={v=>onSet({lat:v===''?null:parseFloat(v)})} placeholder="51.5145"/>
+        <Field label="Lng (manuell)" value={lng} onChange={v=>onSet({lng:v===''?null:parseFloat(v)})} placeholder="7.4610"/>
+      </div>
+      <div className="mono text-[9px] text-zinc-600 leading-relaxed">
+        Klappt die Suche nicht: in Google Maps lange auf den Ort drücken, die beiden Zahlen erscheinen oben — hier eintragen.
+      </div>
+    </div>
+  );
+}
+
+/* ══ IMPORT / EXPORT ═════════════════════════════════════════════════ */
+const IMPORTABLE=[
+  ['artists','Artists'],['pickups','Pickups'],['travel','An-/Abreisen'],
+  ['notes','Notizen'],['contacts','Kontakte'],['guestlist','Gästeliste'],['friendslist','Friendslist'],
+];
+function ImportExport({ev,base}){
+  const [open,setOpen]=useState(false);
+  const [txt,setTxt]=useState('');
+  const [prev,setPrev]=useState(null);
+  const [err,setErr]=useState('');
+  const [mode,setMode]=useState('merge');
+
+  const exportJson=()=>{
+    const out={meta:ev.meta||{}};
+    IMPORTABLE.forEach(([k])=>{ if(ev[k])out[k]=ev[k]; });
+    const s=JSON.stringify(out,null,2);
+    dlFile(s,`${(ev.meta?.name||'event').replace(/[^\w-]/g,'')}-daten.json`,'application/json');
+  };
+  const check=()=>{
+    setErr('');setPrev(null);
+    try{
+      const j=JSON.parse(txt);
+      if(typeof j!=='object'||!j)throw new Error('Kein gültiges Objekt');
+      const counts={};
+      IMPORTABLE.forEach(([k,l])=>{
+        const v=j[k];
+        if(!v)return;
+        const n=Array.isArray(v)?v.length:Object.keys(v).length;
+        if(n)counts[k]={label:l,n};
+      });
+      if(j.meta)counts.meta={label:'Eventdaten (Name, Tage, Floors, Orte)',n:Object.keys(j.meta).length};
+      if(!Object.keys(counts).length)throw new Error('Keine bekannten Abschnitte gefunden');
+      setPrev({j,counts});
+    }catch(e){ setErr('Konnte nicht gelesen werden: '+(e.message||e)); }
+  };
+  const apply=()=>{
+    const {j}=prev;
+    if(j.meta)fbUpd(`${base}/meta`,j.meta);
+    IMPORTABLE.forEach(([k])=>{
+      const v=j[k];
+      if(!v)return;
+      const asObj=Array.isArray(v)
+        ? Object.fromEntries(v.map((x,i)=>[x.id||`${k[0]}${Date.now().toString(36)}${i}`,(({id,...r})=>r)(x)]))
+        : v;
+      if(mode==='replace')fbSet(`${base}/${k}`,asObj);
+      else Object.entries(asObj).forEach(([id,val])=>fbSet(`${base}/${k}/${id}`,val));
+    });
+    setTxt('');setPrev(null);setOpen(false);
+    alert('Daten übernommen.');
+  };
+
+  return(
+    <div>
+      <SectionLabel>Daten ein- und ausspielen</SectionLabel>
+      <div className="space-y-2">
+        <button onClick={exportJson}
+          className="w-full border border-zinc-700 text-zinc-300 mono text-xs py-2.5 rounded-xl active:bg-zinc-900">
+          ⤓ Event als JSON sichern</button>
+        <button onClick={()=>setOpen(true)}
+          className="w-full border border-dashed border-zinc-700 text-zinc-400 mono text-xs py-2.5 rounded-xl active:bg-zinc-900">
+          ⤒ Daten einspielen (Line-up, Pickups, Reisen …)</button>
+        <div className="mono text-[9px] text-zinc-600 leading-relaxed">
+          Praktisch, um ein komplettes Line-up auf einmal zu übernehmen, statt jeden Artist einzeln anzulegen.
+        </div>
+      </div>
+
+      <Sheet open={open} onClose={()=>{setOpen(false);setPrev(null);setErr('');}} title="Daten einspielen">
+        <div className="space-y-3">
+          <div className="mono text-[11px] text-zinc-400 leading-relaxed">
+            JSON hier einfügen. Erkannt werden: <span className="text-zinc-200">meta, artists, pickups,
+            travel, notes, contacts, guestlist, friendslist</span> — jeweils als Objekt oder Liste.
+          </div>
+          <textarea value={txt} onChange={e=>{setTxt(e.target.value);setPrev(null);setErr('');}} rows={8}
+            placeholder={'{\n  "artists": [\n    { "name": "…", "day": "Fr 17.07", "floor": "Floor I",\n      "setStart": "22:00", "setEnd": "00:00" }\n  ]\n}'}
+            className="w-full bg-zinc-900 border border-zinc-700 text-zinc-100 mono text-[11px] px-3 py-2.5 rounded-lg focus:border-amber-500 placeholder-zinc-700 resize-none leading-relaxed"/>
+          <div className="flex gap-2">
+            <button onClick={()=>setMode('merge')}
+              className={`flex-1 py-2 rounded-lg mono text-[10px] border ${mode==='merge'?'bg-amber-500/15 border-amber-500/40 text-amber-300':'bg-zinc-900 border-zinc-700 text-zinc-500'}`}>
+              ergänzen</button>
+            <button onClick={()=>setMode('replace')}
+              className={`flex-1 py-2 rounded-lg mono text-[10px] border ${mode==='replace'?'bg-red-500/15 border-red-500/40 text-red-300':'bg-zinc-900 border-zinc-700 text-zinc-500'}`}>
+              ersetzen</button>
+          </div>
+          <div className="mono text-[9px] text-zinc-600 leading-relaxed">
+            {mode==='merge'
+              ?'Bestehendes bleibt, Neues kommt dazu. Gleiche IDs werden überschrieben.'
+              :'⚠️ Der jeweilige Abschnitt wird komplett ersetzt — alles Bisherige darin ist weg.'}
+          </div>
+          {err&&<div className="mono text-[11px] text-red-400 leading-relaxed">{err}</div>}
+          {!prev
+            ?<button onClick={check} disabled={!txt.trim()}
+               className={`w-full bebas text-lg py-2.5 rounded-xl tracking-widest ${txt.trim()?'bg-zinc-700 text-zinc-100 active:scale-[.98]':'bg-zinc-900 text-zinc-700'}`}>
+               PRÜFEN</button>
+            :<>
+              <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-3 space-y-1">
+                <div className="mono text-[11px] text-emerald-200 font-bold">Wird übernommen:</div>
+                {Object.entries(prev.counts).map(([k,v])=>(
+                  <div key={k} className="flex justify-between mono text-[11px] text-zinc-300">
+                    <span>{v.label}</span><span className="text-emerald-300">{v.n}</span></div>))}
+              </div>
+              <button onClick={apply}
+                className="w-full bg-emerald-500 text-black bebas text-lg py-3 rounded-xl tracking-widest active:scale-[.98]">
+                ÜBERNEHMEN</button>
+            </>}
+        </div>
+      </Sheet>
+    </div>
+  );
+}
+
 /* ══ EVENT SETTINGS (VERWALTEN) ══════════════════════════════════════ */
 function Settings({ev,base,eventId,onDeleted}){
   const meta=ev.meta||{};
@@ -2228,24 +3113,29 @@ function Settings({ev,base,eventId,onDeleted}){
         </div>
       </div>
       <div>
-        <SectionLabel>Hotel</SectionLabel>
-        <div className="space-y-3">
-          <Field label="Name" value={meta.hotelName} onChange={v=>set('hotelName',v)}/>
-          <Field label="Adresse" value={meta.hotelAddr} onChange={v=>set('hotelAddr',v)}/>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Lat" value={meta.hotelLat} onChange={v=>set('hotelLat',parseFloat(v)||null)} placeholder="51.5085"/>
-            <Field label="Lng" value={meta.hotelLng} onChange={v=>set('hotelLng',parseFloat(v)||null)} placeholder="7.4685"/></div>
-        </div>
+        <SectionLabel>🏨 Hotel</SectionLabel>
+        <LocationBlock name={meta.hotelName} addr={meta.hotelAddr} lat={meta.hotelLat} lng={meta.hotelLng}
+          onSet={p=>{const m={};
+            if('name' in p)m.hotelName=p.name; if('addr' in p)m.hotelAddr=p.addr;
+            if('lat' in p)m.hotelLat=p.lat;    if('lng' in p)m.hotelLng=p.lng;
+            fbUpd(`${base}/meta`,m);}}/>
       </div>
       <div>
-        <SectionLabel>Venue</SectionLabel>
+        <SectionLabel>📍 Venue</SectionLabel>
+        <LocationBlock name={meta.venueName} addr={meta.venueAddr} lat={meta.venueLat} lng={meta.venueLng}
+          onSet={p=>{const m={};
+            if('name' in p)m.venueName=p.name; if('addr' in p)m.venueAddr=p.addr;
+            if('lat' in p)m.venueLat=p.lat;    if('lng' in p)m.venueLng=p.lng;
+            fbUpd(`${base}/meta`,m);}}/>
+      </div>
+      <ImportExport ev={ev} base={base}/>
+      <div>
+        <SectionLabel>Abrechnung</SectionLabel>
         <div className="space-y-3">
-          <Field label="Name" value={meta.venueName} onChange={v=>set('venueName',v)}/>
-          <Field label="Adresse" value={meta.venueAddr} onChange={v=>set('venueAddr',v)}/>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Lat" value={meta.venueLat} onChange={v=>set('venueLat',parseFloat(v)||null)} placeholder="51.5145"/>
-            <Field label="Lng" value={meta.venueLng} onChange={v=>set('venueLng',parseFloat(v)||null)} placeholder="7.4610"/></div>
-          <div className="mono text-[10px] text-zinc-600 leading-relaxed">Koordinaten steuern die Karte. In Google Maps auf den Ort lange drücken → Zahlen kopieren.</div>
+          <Field label="Abrechnung geht an (E-Mail)" value={meta.settleEmail} onChange={v=>set('settleEmail',v)}
+            placeholder="name@beispiel.de" type="email"/>
+          <div className="mono text-[10px] text-zinc-600 leading-relaxed">
+            An diese Adresse schickt die Abendleitung am Ende die fertige Abrechnung.</div>
         </div>
       </div>
       <div>
@@ -2274,7 +3164,7 @@ function Settings({ev,base,eventId,onDeleted}){
 }
 
 /* ══ EVENT SHELL ═════════════════════════════════════════════════════ */
-function EventShell({eventId,role,viewAs,setViewAs,onBack,onLogout,driverId}){
+function EventShell({eventId,role,viewAs,setViewAs,onBack,onLogout,driverId,me}){
   const base=`${ROOT}/events/${eventId}`;
   const [ev,setEv]=useState(null);
   const [tab,setTab]=useState('lineup');
@@ -2300,10 +3190,12 @@ function EventShell({eventId,role,viewAs,setViewAs,onBack,onLogout,driverId}){
     tabs=[{id:'grid',label:'RASTER'},{id:'run',label:'ABLAUF'},{id:'lineup',label:'LINE-UP'},
           {id:'pickups',label:'PICKUPS',badge:openP},{id:'travel',label:'AN/ABREISE',badge:openT},
           {id:'shop',label:'EINKAUF'},{id:'map',label:'KARTE',badge:liveD},
-          {id:'guests',label:'GÄSTE'},{id:'contacts',label:'KONTAKTE'},{id:'notes',label:'NOTES'},
+          {id:'guests',label:'GÄSTE'},{id:'kasse',label:'KASSE'},{id:'payouts',label:'AUSZAHLUNG'},
+          {id:'settle',label:'ABRECHNUNG'},{id:'contacts',label:'KONTAKTE'},{id:'notes',label:'NOTES'},
           ...(editable?[{id:'settings',label:'EVENT'}]:[])];
   } else if(eff==='einlass'){
-    tabs=[{id:'guests',label:'GÄSTE'},{id:'grid',label:'RASTER'}];
+    tabs=[{id:'guests',label:'GÄSTE'},{id:'kasse',label:'KASSE'},
+          {id:'payouts',label:'AUSZAHLUNG'},{id:'settle',label:'ABRECHNUNG'},{id:'grid',label:'RASTER'}];
   } else if(eff==='fahrer'){
     tabs=[{id:'fahrer',label:'FAHRTEN',badge:openP+openT},
           {id:'grid',label:'RASTER'},{id:'contacts',label:'KONTAKTE'}];
@@ -2330,6 +3222,9 @@ function EventShell({eventId,role,viewAs,setViewAs,onBack,onLogout,driverId}){
         {valid==='travel'  &&<Travel ev={ev} base={base} editable={editable||eff==='fahrer'}/>}
         {valid==='map'     &&<DriverPanel meta={meta} drivers={drivers}/>}
         {valid==='guests'  &&<Guests ev={ev} base={base}/>}
+        {valid==='kasse'   &&<Kasse ev={ev} base={base} role={eff}/>}
+        {valid==='payouts' &&<Payouts ev={ev} base={base} me={me}/>}
+        {valid==='settle'  &&<Abrechnung ev={ev} base={base} me={me} role={eff}/>}
         {valid==='contacts'&&<Contacts ev={ev} base={base} editable={editable}/>}
         {valid==='fahrer'  &&<FahrerPanel ev={ev} base={base} driverId={driverId}/>}
         {valid==='notes'   &&<Notes ev={ev} base={base} editable={editable}/>}
@@ -2416,6 +3311,7 @@ function Team({me,onBack,events}){
     try{
       const wa=workerAuth();
       const cred=await wa.createUserWithEmailAndPassword(email,tmp);
+      try{ await cred.user.updateProfile({displayName:name}); }catch(e){}  // füllt %FIRST_NAME% in den Mails
       await db.ref(`${USERS}/${cred.user.uid}`).set({uid:cred.user.uid,name,email,role:f.role,
         active:true,mustSetPassword:true,createdAt:Date.now(),createdBy:me.name||me.email||'',
         allEvents:f.evAll?true:false, events:f.evAll?null:(Object.keys(f.evIds).length?f.evIds:null)});
@@ -2501,26 +3397,25 @@ function Team({me,onBack,events}){
             {msg&&msg.t==='ok'&&(
               <div className="rounded-lg px-3 py-3 border bg-emerald-500/10 border-emerald-500/30 space-y-2">
                 <div className="mono text-[12px] text-emerald-200 font-bold">{msg.name} ist angelegt.</div>
-                {msg.mailed?(
-                  <div className="mono text-[11px] text-emerald-200/90 leading-relaxed">
-                    📧 Eine E-Mail ist an <span className="font-bold">{msg.email}</span> unterwegs.
-                    <span className="block text-amber-300/90 mt-1">⚠️ Landet häufig im Spam — sag der Person, sie soll dort nachsehen.</span></div>
-                ):(
-                  <div className="mono text-[11px] text-amber-200 leading-relaxed">
-                    ⚠️ Die E-Mail konnte nicht verschickt werden. Gib die Einladung unten direkt weiter.</div>)}
+                <div className="mono text-[11px] text-zinc-300 leading-relaxed">
+                  Schick ihr jetzt die Zugangsdaten — das ist der sichere Weg:</div>
+                <button onClick={()=>shareInvite(msg.name,msg.email,msg.tmp)}
+                  className="w-full bg-emerald-500 text-black bebas text-lg py-3 rounded-lg tracking-wide active:scale-[.98]">
+                  ↗ EINLADUNG SENDEN</button>
                 <div className="mono text-[10px] text-zinc-400 bg-zinc-950/60 rounded px-2.5 py-2 leading-relaxed">
                   E-Mail: <span className="text-zinc-200">{msg.email}</span><br/>
                   Startpasswort: <span className="text-zinc-200">{msg.tmp}</span><br/>
                   Beim ersten Öffnen verlangt die App ein eigenes Passwort.</div>
-                <button onClick={()=>shareInvite(msg.name,msg.email,msg.tmp)}
-                  className="w-full bg-emerald-500 text-black mono text-[11px] font-bold py-2 rounded active:scale-[.98]">
-                  ↗ Einladung per WhatsApp / SMS senden</button>
                 <div className="flex gap-2">
                   <button onClick={()=>navigator.clipboard?.writeText(`backstage.app\n${location.href}\nE-Mail: ${msg.email}\nStartpasswort: ${msg.tmp}`)}
-                    className="flex-1 border border-emerald-500/40 text-emerald-300 mono text-[10px] py-1.5 rounded">Daten kopieren</button>
+                    className="flex-1 border border-zinc-600 text-zinc-300 mono text-[10px] py-1.5 rounded">Daten kopieren</button>
                   <button onClick={()=>resend(msg.email)}
-                    className="flex-1 border border-emerald-500/40 text-emerald-300 mono text-[10px] py-1.5 rounded">Mail nochmal</button>
+                    className="flex-1 border border-zinc-600 text-zinc-300 mono text-[10px] py-1.5 rounded">Mail schicken</button>
                 </div>
+                <div className="mono text-[10px] text-zinc-500 leading-relaxed">
+                  {msg.mailed
+                    ?'Zusätzlich ist eine Firebase-Mail unterwegs — die landet oft im Spam, verlass dich nicht darauf.'
+                    :'Die Firebase-Mail konnte nicht verschickt werden — nimm den Weg oben.'}</div>
               </div>)}
           </div>)}
 
@@ -2751,7 +3646,7 @@ function App(){
   else if(creating) body=<NewEvent onCancel={()=>setCreating(false)} onCreated={id=>{setCreating(false);open(id);}}/>;
   else if(openId&&visible[openId])
     body=<EventShell eventId={openId} role={role} viewAs={viewAs} setViewAs={switchRole}
-      onBack={back} onLogout={logout} driverId={driverId}/>;
+      onBack={back} onLogout={logout} driverId={driverId} me={auth.user}/>;
   else body=<EventList events={visible} role={role} onOpen={open} onLogout={logout}
     canManage={role==='superadmin'||role==='leitung'} onCreate={()=>setCreating(true)}
     onSwitchRole={switchRole} onTeam={role==='superadmin'?()=>setShowTeam(true):null}

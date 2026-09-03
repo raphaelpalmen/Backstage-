@@ -2492,15 +2492,37 @@ function Payouts({ev,base,me}){
 function Abrechnung({ev,base,me,role}){
   const meta=ev.meta||{};
   const t=kasseTotals(ev);
-  const st=ev.kasse?.settlement||null;
   const canConfirm=role==='leitung'||role==='superadmin';
   const guests=obj2arr(ev.guestlist).filter(g=>g.checkedIn).length;
   const friends=obj2arr(ev.friendslist).filter(g=>g.checkedIn).length;
 
+  /* Versandhistorie — jeder Versand bleibt erhalten */
+  const sent=obj2arr(ev.kasse?.settlements).sort((a,b)=>(a.confirmedAt||0)-(b.confirmedAt||0));
+  const legacy=ev.kasse?.settlement;
+  const history=sent.length?sent:(legacy?[{id:'alt',...legacy,no:1}]:[]);
+  const last=history.length?history[history.length-1]:null;
+
+  /* Hat sich seit dem letzten Versand etwas geändert? */
+  const FIELDS=[['total','Einnahmen'],['ec','EC'],['bar','Bar'],['out','Auszahlungen'],
+                ['cash','Bargeld'],['people','Gäste']];
+  const diffs=last?FIELDS.map(([k,l])=>({k,l,alt:Number(last[k])||0,neu:Number(t[k])||0}))
+    .filter(d=>Math.abs(d.alt-d.neu)>0.001):[];
+  const changed=diffs.length>0;
+
+  const nextNo=history.length+1;
   const text=useMemo(()=>{
     const L=[];
     L.push(`ABRECHNUNG — ${meta.name||'Event'}`);
     L.push(`${meta.date||''} · ${meta.city||''}`);
+    if(last){
+      L.push('');
+      L.push(`*** KORRIGIERTE FASSUNG Nr. ${nextNo} ***`);
+      L.push(`Ersetzt die Abrechnung vom ${new Date(last.confirmedAt).toLocaleString('de-DE')}.`);
+      if(diffs.length){
+        L.push('Geändert hat sich:');
+        diffs.forEach(d=>L.push(`  ${d.l}: ${d.k==='people'?d.alt:eur(d.alt)} → ${d.k==='people'?d.neu:eur(d.neu)}`));
+      }
+    }
     L.push('');
     L.push('ABENDKASSE (Klicker)');
     t.blocks.forEach(b=>{const s=blockSum(b);const cc=b.counts||{};
@@ -2532,15 +2554,19 @@ function Abrechnung({ev,base,me,role}){
     L.push(`Eingecheckt: Gästeliste ${guests} · Friendslist ${friends}`);
     L.push('');
     L.push(`Bestätigt von ${me?.name||me?.email||''} am ${new Date().toLocaleString('de-DE')}`);
+    if(last)L.push(`Fassung Nr. ${nextNo}`);
     return L.join('\n');
-  },[JSON.stringify([ev.kasse,meta,guests,friends])]);
+  },[JSON.stringify([ev.kasse,meta,guests,friends,last?.confirmedAt])]);
 
   const confirmSend=()=>{
     const to=(meta.settleEmail||'').trim();
     if(!to){alert('Es ist keine Empfängeradresse hinterlegt.\n\nDie Leitung trägt sie unter EVENT → Abrechnung ein.');return;}
-    fbSet(`${base}/kasse/settlement`,{confirmedBy:me?.name||me?.email||'',confirmedAt:Date.now(),
-      sentTo:to,ec:t.ec,bar:t.bar,total:t.total,out:t.out,cash:t.cash,net:t.net,people:t.people,text});
-    const subj=`Abrechnung ${meta.name||'Event'} — ${meta.date||''}`;
+    const now=Date.now();
+    fbSet(`${base}/kasse/settlements/s${now}`,{no:nextNo,confirmedBy:me?.name||me?.email||'',
+      confirmedAt:now,sentTo:to,ec:t.ec,bar:t.bar,total:t.total,out:t.out,cash:t.cash,
+      net:t.net,people:t.people,text,
+      corrects:last?(last.no||1):null});
+    const subj=`${last?`Abrechnung KORRIGIERT (Nr. ${nextNo})`:'Abrechnung'} ${meta.name||'Event'} — ${meta.date||''}`;
     window.location.href=`mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(text)}`;
   };
 
@@ -2553,11 +2579,34 @@ function Abrechnung({ev,base,me,role}){
 
   return(
     <div className="px-4 pt-4 pb-24">
-      {st&&(
+      {last&&!changed&&(
         <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 mb-4">
           <div className="mono text-[11px] text-emerald-200 leading-relaxed">
-            ✓ Bestätigt von {st.confirmedBy}<br/>
-            {new Date(st.confirmedAt).toLocaleString('de-DE')} · gesendet an {st.sentTo}</div>
+            ✓ Abrechnung verschickt{history.length>1?` (Fassung ${last.no||history.length})`:''}<br/>
+            <span className="text-emerald-200/70">{last.confirmedBy} · {new Date(last.confirmedAt).toLocaleString('de-DE')} · an {last.sentTo}</span><br/>
+            <span className="text-emerald-200/70">Stimmt mit den aktuellen Zahlen überein.</span></div>
+        </div>)}
+
+      {last&&changed&&(
+        <div className="rounded-xl border border-amber-500/50 bg-amber-500/10 px-4 py-3 mb-4">
+          <div className="mono text-[12px] text-amber-200 font-bold mb-1.5">
+            ⚠️ Zahlen haben sich seit dem Versand geändert</div>
+          <div className="mono text-[10px] text-zinc-400 mb-2">
+            Verschickt {new Date(last.confirmedAt).toLocaleString('de-DE')} von {last.confirmedBy}.
+            Die Empfängerin hat noch die alten Zahlen.</div>
+          <div className="space-y-0.5">
+            {diffs.map(d=>(
+              <div key={d.k} className="flex justify-between mono text-[11px]">
+                <span className="text-zinc-400">{d.l}</span>
+                <span>
+                  <span className="text-zinc-600 line-through">{d.k==='people'?d.alt:eur(d.alt)}</span>
+                  <span className="text-amber-300 font-bold"> → {d.k==='people'?d.neu:eur(d.neu)}</span>
+                </span>
+              </div>))}
+          </div>
+          <div className="mono text-[10px] text-amber-300/80 mt-2 leading-relaxed">
+            Schick die Abrechnung nochmal — sie geht als korrigierte Fassung Nr. {nextNo} raus,
+            mit einer Auflistung, was sich geändert hat.</div>
         </div>)}
 
       <SectionLabel>Abendkasse</SectionLabel>
@@ -2617,17 +2666,41 @@ function Abrechnung({ev,base,me,role}){
             Empfänger: <span className="text-zinc-300">{meta.settleEmail||'— noch keiner hinterlegt —'}</span>
           </div>
           <button onClick={confirmSend}
-            className="w-full bg-emerald-500 text-black bebas text-xl py-3.5 rounded-xl tracking-widest active:scale-[.98]">
-            {st?'ERNEUT BESTÄTIGEN & SENDEN':'BESTÄTIGEN & SENDEN'}</button>
+            className={`w-full bebas text-xl py-3.5 rounded-xl tracking-widest active:scale-[.98]
+              ${changed?'bg-amber-500 text-black':'bg-emerald-500 text-black'}`}>
+            {!last?'BESTÄTIGEN & SENDEN'
+              :changed?`KORRIGIERTE FASSUNG ${nextNo} SENDEN`
+              :'NOCHMAL SENDEN'}</button>
           <button onClick={()=>navigator.clipboard?.writeText(text)}
             className="w-full border border-zinc-700 text-zinc-400 mono text-xs py-2.5 rounded-xl active:bg-zinc-900">
             Abrechnung kopieren</button>
           <div className="mono text-[10px] text-zinc-600 leading-relaxed pt-1">
-            Beim Bestätigen wird die Abrechnung gespeichert und dein Mailprogramm mit fertiger Nachricht geöffnet — du musst dort nur noch auf Senden tippen.</div>
+            Beim Bestätigen wird die Abrechnung gespeichert und dein Mailprogramm mit fertiger Nachricht geöffnet — du musst dort nur noch auf Senden tippen.
+            Jeder Versand bleibt gespeichert, du kannst also jederzeit korrigieren und neu schicken.</div>
+
+          {history.length>0&&(
+            <details className="pt-2">
+              <summary className="mono text-[11px] text-zinc-500 py-1.5 cursor-pointer">
+                Versandverlauf ({history.length})</summary>
+              <div className="space-y-1.5 mt-1.5">
+                {[...history].reverse().map((h,i)=>(
+                  <div key={h.id} className="rounded-lg border border-zinc-800 bg-zinc-900/50 px-3 py-2">
+                    <div className="flex justify-between items-baseline">
+                      <span className="mono text-[11px] text-zinc-300">
+                        Fassung {h.no||history.length-i}{h.corrects?` (Korrektur von ${h.corrects})`:''}</span>
+                      <span className="mono text-[11px] text-zinc-400">{eur(h.total)}</span>
+                    </div>
+                    <div className="mono text-[9px] text-zinc-600">
+                      {h.confirmedBy} · {new Date(h.confirmedAt).toLocaleString('de-DE')}</div>
+                  </div>))}
+              </div>
+            </details>)}
         </div>
       ):(
         <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-4 py-3 mono text-[11px] text-zinc-500 leading-relaxed">
-          Die Abendleitung bestätigt und verschickt die Abrechnung. Zähl in Ruhe fertig — hier siehst du jederzeit den Stand.
+          {changed
+            ?<>Du hast nach dem Versand noch etwas korrigiert. Sag der Abendleitung Bescheid, damit sie die Abrechnung nochmal schickt.</>
+            :<>Die Abendleitung bestätigt und verschickt die Abrechnung. Zähl in Ruhe fertig — hier siehst du jederzeit den Stand.</>}
         </div>)}
     </div>
   );
@@ -2877,6 +2950,116 @@ function LocationBlock({icon,title,name,addr,lat,lng,onSet}){
   );
 }
 
+/* ══ IMPORT / EXPORT ═════════════════════════════════════════════════ */
+const IMPORTABLE=[
+  ['artists','Artists'],['pickups','Pickups'],['travel','An-/Abreisen'],
+  ['notes','Notizen'],['contacts','Kontakte'],['guestlist','Gästeliste'],['friendslist','Friendslist'],
+];
+function ImportExport({ev,base}){
+  const [open,setOpen]=useState(false);
+  const [txt,setTxt]=useState('');
+  const [prev,setPrev]=useState(null);
+  const [err,setErr]=useState('');
+  const [mode,setMode]=useState('merge');
+
+  const exportJson=()=>{
+    const out={meta:ev.meta||{}};
+    IMPORTABLE.forEach(([k])=>{ if(ev[k])out[k]=ev[k]; });
+    const s=JSON.stringify(out,null,2);
+    dlFile(s,`${(ev.meta?.name||'event').replace(/[^\w-]/g,'')}-daten.json`,'application/json');
+  };
+  const check=()=>{
+    setErr('');setPrev(null);
+    try{
+      const j=JSON.parse(txt);
+      if(typeof j!=='object'||!j)throw new Error('Kein gültiges Objekt');
+      const counts={};
+      IMPORTABLE.forEach(([k,l])=>{
+        const v=j[k];
+        if(!v)return;
+        const n=Array.isArray(v)?v.length:Object.keys(v).length;
+        if(n)counts[k]={label:l,n};
+      });
+      if(j.meta)counts.meta={label:'Eventdaten (Name, Tage, Floors, Orte)',n:Object.keys(j.meta).length};
+      if(!Object.keys(counts).length)throw new Error('Keine bekannten Abschnitte gefunden');
+      setPrev({j,counts});
+    }catch(e){ setErr('Konnte nicht gelesen werden: '+(e.message||e)); }
+  };
+  const apply=()=>{
+    const {j}=prev;
+    if(j.meta)fbUpd(`${base}/meta`,j.meta);
+    IMPORTABLE.forEach(([k])=>{
+      const v=j[k];
+      if(!v)return;
+      const asObj=Array.isArray(v)
+        ? Object.fromEntries(v.map((x,i)=>[x.id||`${k[0]}${Date.now().toString(36)}${i}`,(({id,...r})=>r)(x)]))
+        : v;
+      if(mode==='replace')fbSet(`${base}/${k}`,asObj);
+      else Object.entries(asObj).forEach(([id,val])=>fbSet(`${base}/${k}/${id}`,val));
+    });
+    setTxt('');setPrev(null);setOpen(false);
+    alert('Daten übernommen.');
+  };
+
+  return(
+    <div>
+      <SectionLabel>Daten ein- und ausspielen</SectionLabel>
+      <div className="space-y-2">
+        <button onClick={exportJson}
+          className="w-full border border-zinc-700 text-zinc-300 mono text-xs py-2.5 rounded-xl active:bg-zinc-900">
+          ⤓ Event als JSON sichern</button>
+        <button onClick={()=>setOpen(true)}
+          className="w-full border border-dashed border-zinc-700 text-zinc-400 mono text-xs py-2.5 rounded-xl active:bg-zinc-900">
+          ⤒ Daten einspielen (Line-up, Pickups, Reisen …)</button>
+        <div className="mono text-[9px] text-zinc-600 leading-relaxed">
+          Praktisch, um ein komplettes Line-up auf einmal zu übernehmen, statt jeden Artist einzeln anzulegen.
+        </div>
+      </div>
+
+      <Sheet open={open} onClose={()=>{setOpen(false);setPrev(null);setErr('');}} title="Daten einspielen">
+        <div className="space-y-3">
+          <div className="mono text-[11px] text-zinc-400 leading-relaxed">
+            JSON hier einfügen. Erkannt werden: <span className="text-zinc-200">meta, artists, pickups,
+            travel, notes, contacts, guestlist, friendslist</span> — jeweils als Objekt oder Liste.
+          </div>
+          <textarea value={txt} onChange={e=>{setTxt(e.target.value);setPrev(null);setErr('');}} rows={8}
+            placeholder={'{\n  "artists": [\n    { "name": "…", "day": "Fr 17.07", "floor": "Floor I",\n      "setStart": "22:00", "setEnd": "00:00" }\n  ]\n}'}
+            className="w-full bg-zinc-900 border border-zinc-700 text-zinc-100 mono text-[11px] px-3 py-2.5 rounded-lg focus:border-amber-500 placeholder-zinc-700 resize-none leading-relaxed"/>
+          <div className="flex gap-2">
+            <button onClick={()=>setMode('merge')}
+              className={`flex-1 py-2 rounded-lg mono text-[10px] border ${mode==='merge'?'bg-amber-500/15 border-amber-500/40 text-amber-300':'bg-zinc-900 border-zinc-700 text-zinc-500'}`}>
+              ergänzen</button>
+            <button onClick={()=>setMode('replace')}
+              className={`flex-1 py-2 rounded-lg mono text-[10px] border ${mode==='replace'?'bg-red-500/15 border-red-500/40 text-red-300':'bg-zinc-900 border-zinc-700 text-zinc-500'}`}>
+              ersetzen</button>
+          </div>
+          <div className="mono text-[9px] text-zinc-600 leading-relaxed">
+            {mode==='merge'
+              ?'Bestehendes bleibt, Neues kommt dazu. Gleiche IDs werden überschrieben.'
+              :'⚠️ Der jeweilige Abschnitt wird komplett ersetzt — alles Bisherige darin ist weg.'}
+          </div>
+          {err&&<div className="mono text-[11px] text-red-400 leading-relaxed">{err}</div>}
+          {!prev
+            ?<button onClick={check} disabled={!txt.trim()}
+               className={`w-full bebas text-lg py-2.5 rounded-xl tracking-widest ${txt.trim()?'bg-zinc-700 text-zinc-100 active:scale-[.98]':'bg-zinc-900 text-zinc-700'}`}>
+               PRÜFEN</button>
+            :<>
+              <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-3 space-y-1">
+                <div className="mono text-[11px] text-emerald-200 font-bold">Wird übernommen:</div>
+                {Object.entries(prev.counts).map(([k,v])=>(
+                  <div key={k} className="flex justify-between mono text-[11px] text-zinc-300">
+                    <span>{v.label}</span><span className="text-emerald-300">{v.n}</span></div>))}
+              </div>
+              <button onClick={apply}
+                className="w-full bg-emerald-500 text-black bebas text-lg py-3 rounded-xl tracking-widest active:scale-[.98]">
+                ÜBERNEHMEN</button>
+            </>}
+        </div>
+      </Sheet>
+    </div>
+  );
+}
+
 /* ══ EVENT SETTINGS (VERWALTEN) ══════════════════════════════════════ */
 function Settings({ev,base,eventId,onDeleted}){
   const meta=ev.meta||{};
@@ -2945,6 +3128,7 @@ function Settings({ev,base,eventId,onDeleted}){
             if('lat' in p)m.venueLat=p.lat;    if('lng' in p)m.venueLng=p.lng;
             fbUpd(`${base}/meta`,m);}}/>
       </div>
+      <ImportExport ev={ev} base={base}/>
       <div>
         <SectionLabel>Abrechnung</SectionLabel>
         <div className="space-y-3">
