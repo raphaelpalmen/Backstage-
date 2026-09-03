@@ -342,8 +342,9 @@ function buildSeed(){
     meta:{name:'UNREAL',date:'17.–18.07.2026',city:'Dortmund · Junkyard',
       days:['Fr 17.07','Sa 18.07'],
       floors:['Floor I Outdoor','Floor II Indoor','Floor III Indoor'],
-      hotelName:'Radisson Blu Hotel',hotelAddr:'Märkische Str. 31, 44141 Dortmund',hotelLat:51.5085,hotelLng:7.4685,
-      venueName:'Junkyard Club',venueAddr:'Ritterstr. 20, 44137 Dortmund',venueLat:51.5145,venueLng:7.4610,
+      /* Koordinaten per OpenStreetMap nachgeschlagen, nicht geschätzt */
+      hotelName:'Radisson Blu Hotel',hotelAddr:'Märkische Str. 31, 44141 Dortmund',hotelLat:51.50101,hotelLng:7.48239,
+      venueName:'Junkyard Club',venueAddr:'Ritterstr. 20, 44137 Dortmund',venueLat:51.51497,venueLng:7.45013,
       archived:false,createdAt:Date.now()},
     artists,pickups,notes};
 }
@@ -971,6 +972,14 @@ function DriverPanel({meta,drivers}){
         <span className="mono text-[11px] text-zinc-400">
           {active.length?`${active.length} Fahrer live`:'Kein Fahrer teilt gerade seinen Standort'}</span>
       </div>
+      {!okCoord(meta.hotelLat,meta.hotelLng)&&!okCoord(meta.venueLat,meta.venueLng)&&(
+        <div className="flex-shrink-0 bg-amber-500/10 border-b border-amber-500/25 px-4 py-2.5">
+          <div className="mono text-[11px] text-amber-200 leading-relaxed">
+            Für dieses Event sind noch keine Standorte hinterlegt — deshalb ist die Karte leer.</div>
+          <div className="mono text-[10px] text-zinc-400 mt-1 leading-relaxed">
+            Unter <span className="text-amber-300">EVENT → Hotel / Venue</span> die Adresse eintragen und auf
+            „📍 Koordinaten aus Adresse holen" tippen. Fahrer-Standorte erscheinen auch ohne das.</div>
+        </div>)}
       <div className="flex-1 min-h-[300px]"><MapPanel meta={meta} drivers={drivers}/></div>
       <div className="flex-shrink-0 border-t border-zinc-800 max-h-[38%] overflow-y-auto safe-bot">
         {drivers.length===0&&<div className="px-4 py-5 text-zinc-700 mono text-xs text-center">Noch kein Fahrer eingeloggt.</div>}
@@ -1267,6 +1276,8 @@ function PickupSheet({p,meta,onClose,onSave,onDelete}){
 function Guests({ev,base}){
   const [which,setWhich]=useState('guestlist');
   const [q,setQ]=useState('');const [add,setAdd]=useState(false);
+  const [paying,setPaying]=useState(null);
+  const activeBlock=obj2arr(ev.kasse?.blocks).find(b=>!b.closedAt);
   const [nName,setNName]=useState('');const [nPlus,setNPlus]=useState('0');const [nNote,setNNote]=useState('');
   const path=`${base}/${which}`;
   const raw=obj2arr(ev[which]);
@@ -1319,19 +1330,93 @@ function Guests({ev,base}){
       )}
       <div className="flex-1 overflow-y-auto px-4 safe-bot">
         {rows.length===0&&<Empty>{q?'Niemanden gefunden.':'Noch keine Einträge.\nMit + hinzufügen.'}</Empty>}
-        {rows.map(g=><GuestRow key={g.id} g={g} path={path}/>)}
+        {rows.map(g=><GuestRow key={g.id} g={g} path={path}
+          isFriends={which==='friendslist'}
+          onCheckIn={()=>setPaying(g)}/>)}
       </div>
+      <PaySheet g={paying} price={activeBlock?.friendsPrice} open={!!paying}
+        onClose={()=>setPaying(null)}
+        onDone={(pay,qty,amount)=>{
+          fbUpd(`${path}/${paying.id}`,{checkedIn:true,inAt:Date.now(),
+            pay,qty,unitPrice:pay==='free'?0:(Number(activeBlock?.friendsPrice)||0),
+            amount,blockId:activeBlock?.id||null});
+          setPaying(null);
+        }}/>
     </div>
   );
 }
-function GuestRow({g,path}){
+/* Bar / EC / frei beim Einchecken auf der Friendslist */
+function PaySheet({g,price,open,onClose,onDone}){
+  const [qty,setQty]=useState(1);
+  useEffect(()=>{ if(g)setQty(1+(Number(g.plus)||0)); },[g]);
+  if(!open||!g)return null;
+  const p=Number(price)||0;
+  const total=p*qty;
+  const noPrice=!price&&price!==0;
+  const Btn=({pay,label,color,sub})=>(
+    <button onClick={()=>onDone(pay,qty,pay==='free'?0:total)}
+      className="flex-1 rounded-xl py-3.5 active:scale-[.97] transition-transform"
+      style={{background:color,color:'#09090b'}}>
+      <span className="block bebas text-xl tracking-wide leading-none">{label}</span>
+      <span className="block mono text-[10px] font-bold mt-0.5 opacity-70">{sub}</span>
+    </button>);
+  return(
+    <Sheet open={open} onClose={onClose} title={g.name||'Gast'}>
+      <div className="space-y-4">
+        {noPrice&&(
+          <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-3.5 py-2.5 mono text-[11px] text-amber-200 leading-relaxed">
+            Die Kasse ist noch nicht geöffnet — es ist kein Friendslist-Preis hinterlegt.
+            Du kannst trotzdem als „frei" einchecken.</div>)}
+
+        <div>
+          <div className="mono text-[10px] text-zinc-500 uppercase tracking-wider mb-2">Wie viele Personen?</div>
+          <div className="flex items-center gap-3">
+            <button onClick={()=>setQty(n=>Math.max(1,n-1))}
+              className="w-12 h-12 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-200 text-2xl active:bg-zinc-700">−</button>
+            <div className="flex-1 text-center">
+              <div className="bebas text-4xl text-white leading-none">{qty}</div>
+              {(Number(g.plus)||0)>0&&<div className="mono text-[9px] text-zinc-600 mt-0.5">eingetragen: 1 +{g.plus}</div>}
+            </div>
+            <button onClick={()=>setQty(n=>n+1)}
+              className="w-12 h-12 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-200 text-2xl active:bg-zinc-700">+</button>
+          </div>
+        </div>
+
+        {!noPrice&&(
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 px-4 py-3 flex items-baseline justify-between">
+            <span className="mono text-[11px] text-zinc-400">{qty} × {eur(p)}</span>
+            <span className="bebas text-3xl text-amber-400 leading-none">{eur(total)}</span>
+          </div>)}
+
+        <div>
+          <div className="mono text-[10px] text-zinc-500 uppercase tracking-wider mb-2">Wie bezahlt?</div>
+          <div className="flex gap-2">
+            <Btn pay="bar" label="BAR" color="#34d399" sub={noPrice?'':eur(total)}/>
+            <Btn pay="ec"  label="EC"  color="#60a5fa" sub={noPrice?'':eur(total)}/>
+          </div>
+          <button onClick={()=>onDone('free',qty,0)}
+            className="w-full mt-2 border border-zinc-700 text-zinc-400 mono text-xs py-2.5 rounded-xl active:bg-zinc-900">
+            Frei / Gast des Hauses</button>
+        </div>
+      </div>
+    </Sheet>
+  );
+}
+const PAYTAG={bar:{l:'BAR',c:'#34d399'},ec:{l:'EC',c:'#60a5fa'},free:{l:'FREI',c:'#71717a'}};
+function GuestRow({g,path,isFriends,onCheckIn}){
   const [ed,setEd]=useState(false);
   const [n,setN]=useState(g.name);const [p,setP]=useState(String(g.plus||0));const [nt,setNt]=useState(g.note||'');
   useEffect(()=>{setN(g.name);setP(String(g.plus||0));setNt(g.note||'');},[g.name,g.plus,g.note]);
   const save=()=>{fbUpd(`${path}/${g.id}`,{name:n,plus:+p||0,note:nt});setEd(false);};
+  const toggle=()=>{
+    if(g.checkedIn) fbUpd(`${path}/${g.id}`,{checkedIn:false,inAt:null,pay:null,qty:null,unitPrice:null,amount:null,blockId:null});
+    else if(isFriends) onCheckIn();
+    else fbUpd(`${path}/${g.id}`,{checkedIn:true,inAt:Date.now()});
+  };
+  const tag=g.checkedIn&&g.pay?PAYTAG[g.pay]:null;
   return(
     <div className={`flex items-center gap-3 py-2.5 border-b border-zinc-800/60 transition-all ${g.checkedIn?'opacity-45':''}`}>
-      <Check checked={!!g.checkedIn} onToggle={()=>fbUpd(`${path}/${g.id}`,{checkedIn:!g.checkedIn,inAt:!g.checkedIn?Date.now():null})} size={32}/>
+      <Check checked={!!g.checkedIn} onToggle={toggle} size={32}/>
       <div className="flex-1 min-w-0">
         {ed?(
           <div className="space-y-1.5">
@@ -1352,9 +1437,16 @@ function GuestRow({g,path}){
             <div className="flex items-center gap-1.5">
               <span className={`mono text-sm font-bold truncate ${g.checkedIn?'text-zinc-500 line-through':'text-zinc-100'}`}>{g.name}</span>
               {g.plus>0&&<span className="mono text-[11px] text-amber-500/80 flex-shrink-0">+{g.plus}</span>}
+              {tag&&<span className="mono text-[8px] font-bold px-1.5 py-0.5 rounded flex-shrink-0"
+                style={{color:tag.c,background:tag.c+'22',border:'1px solid '+tag.c+'55'}}>{tag.l}</span>}
             </div>
             {g.note&&<div className="mono text-[10px] text-zinc-600 truncate">{g.note}</div>}
-            {g.checkedIn&&g.inAt&&<div className="mono text-[9px] text-emerald-600">✓ {new Date(g.inAt).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})}</div>}
+            {g.checkedIn&&g.inAt&&(
+              <div className="mono text-[9px] text-emerald-600">
+                ✓ {new Date(g.inAt).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})}
+                {g.pay&&g.pay!=='free'&&<span className="text-zinc-500"> · {g.qty}× · {eur(g.amount)}</span>}
+                {g.pay==='free'&&<span className="text-zinc-500"> · {g.qty}× frei</span>}
+              </div>)}
           </>
         )}
       </div>
@@ -2006,27 +2098,42 @@ function TravelSheet({t,onClose,onSave,onDelete}){
 
 /* ══ ABENDKASSE ══════════════════════════════════════════════════════ */
 const eur=n=>(Number(n)||0).toFixed(2).replace('.',',')+' €';
+/* Klicker nur für Abendkasse. Friendslist wird über die Namensliste abgerechnet. */
 const CNT=[
-  {k:'ecNorm', l:'EC · Normal',    pay:'ec',  kind:'norm',  c:'#60a5fa'},
-  {k:'barNorm',l:'Bar · Normal',   pay:'bar', kind:'norm',  c:'#34d399'},
-  {k:'ecFr',   l:'EC · Friends',   pay:'ec',  kind:'fr',    c:'#a78bfa'},
-  {k:'barFr',  l:'Bar · Friends',  pay:'bar', kind:'fr',    c:'#fbbf24'},
+  {k:'ecNorm', l:'EC',  pay:'ec',  c:'#60a5fa'},
+  {k:'barNorm',l:'Bar', pay:'bar', c:'#34d399'},
 ];
 const blockSum=b=>{
   const c=b.counts||{};
-  const p=Number(b.price)||0, f=Number(b.friendsPrice)||0;
-  const ec=(Number(c.ecNorm)||0)*p+(Number(c.ecFr)||0)*f;
-  const bar=(Number(c.barNorm)||0)*p+(Number(c.barFr)||0)*f;
-  const people=CNT.reduce((s,x)=>s+(Number(c[x.k])||0),0);
+  const p=Number(b.price)||0;
+  const ec=(Number(c.ecNorm)||0)*p;
+  const bar=(Number(c.barNorm)||0)*p;
+  const people=(Number(c.ecNorm)||0)+(Number(c.barNorm)||0);
   return{ec,bar,total:ec+bar,people};
+};
+/* Einnahmen aus der Friendslist — aus den abgehakten Einträgen */
+const friendsTotals=ev=>{
+  let ec=0,bar=0,people=0,free=0,count=0;
+  obj2arr(ev.friendslist).forEach(g=>{
+    if(!g.checkedIn)return;
+    const qty=Number(g.qty)||1;
+    people+=qty;count++;
+    if(g.pay==='ec')ec+=Number(g.amount)||0;
+    else if(g.pay==='bar')bar+=Number(g.amount)||0;
+    else free+=qty;
+  });
+  return{ec,bar,total:ec+bar,people,free,count};
 };
 const kasseTotals=ev=>{
   const blocks=obj2arr(ev.kasse?.blocks);
   let ec=0,bar=0,people=0;
   blocks.forEach(b=>{const s=blockSum(b);ec+=s.ec;bar+=s.bar;people+=s.people;});
+  const fr=friendsTotals(ev);
   const payouts=obj2arr(ev.kasse?.payouts);
   const out=payouts.reduce((s,p)=>s+(Number(p.amount)||0),0);
-  return{blocks,payouts,ec,bar,total:ec+bar,people,out,cash:bar-out,net:ec+bar-out};
+  const tEc=ec+fr.ec, tBar=bar+fr.bar, total=tEc+tBar;
+  return{blocks,payouts,fr,kasseEc:ec,kasseBar:bar,kassePeople:people,
+    ec:tEc,bar:tBar,total,people:people+fr.people,out,cash:tBar-out,net:total-out};
 };
 
 function Kasse({ev,base,role}){
@@ -2063,11 +2170,12 @@ function Kasse({ev,base,role}){
           className="w-full bg-emerald-500 text-black bebas text-xl py-3 rounded-xl tracking-widest active:scale-[.98]">
           KASSE ÖFFNEN</button>
       </div>
-      {blocks.length>0&&<div className="mt-5"><ClosedBlocks blocks={blocks}/></div>}
+      {blocks.length>0&&<div className="mt-5"><ClosedBlocks blocks={blocks} base={base} hasActive={false}/></div>}
     </div>);
 
   const s=blockSum(active);
   const c=active.counts||{};
+  const fr=friendsTotals(ev);
   return(
     <div className="px-4 pt-4 pb-24">
       {/* aktueller Preis */}
@@ -2086,35 +2194,53 @@ function Kasse({ev,base,role}){
           seit {new Date(active.startedAt).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})} Uhr</div>
       </div>
 
-      {/* Zähler */}
+      {/* Zähler — nur Abendkasse */}
+      <div className="mono text-[9px] text-zinc-600 uppercase tracking-[.18em] mb-2">Abendkasse · {eur(active.price)} pro Person</div>
       <div className="grid grid-cols-2 gap-2.5 mb-4">
         {CNT.map(x=>{
           const n=Number(c[x.k])||0;
-          const price=x.kind==='fr'?active.friendsPrice:active.price;
           return(
-            <div key={x.k} className="rounded-xl border bg-zinc-900/70 p-2.5"
-              style={{borderColor:x.c+'44'}}>
-              <div className="mono text-[10px] font-bold mb-0.5" style={{color:x.c}}>{x.l}</div>
-              <div className="mono text-[9px] text-zinc-600 mb-2">à {eur(price)}</div>
+            <div key={x.k} className="rounded-xl border bg-zinc-900/70 p-3" style={{borderColor:x.c+'44'}}>
+              <div className="mono text-[11px] font-bold mb-2" style={{color:x.c}}>{x.l}</div>
               <div className="flex items-center gap-2">
                 <button onClick={()=>fbInc(`${base}/kasse/blocks/${active.id}/counts/${x.k}`,-1)}
-                  className="w-10 h-10 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 text-xl leading-none active:bg-zinc-700 flex items-center justify-center flex-shrink-0">−</button>
+                  className="w-11 h-11 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 text-2xl leading-none active:bg-zinc-700 flex items-center justify-center flex-shrink-0">−</button>
                 <div className="flex-1 text-center">
-                  <div className="bebas text-3xl leading-none" style={{color:n?x.c:'#3f3f46'}}>{n}</div>
-                  <div className="mono text-[9px] text-zinc-600">{eur(n*price)}</div>
+                  <div className="bebas text-4xl leading-none" style={{color:n?x.c:'#3f3f46'}}>{n}</div>
+                  <div className="mono text-[9px] text-zinc-600">{eur(n*active.price)}</div>
                 </div>
                 <button onClick={()=>fbInc(`${base}/kasse/blocks/${active.id}/counts/${x.k}`,1)}
-                  className="w-10 h-10 rounded-lg text-black text-xl leading-none active:scale-90 flex items-center justify-center flex-shrink-0 font-bold"
+                  className="w-11 h-11 rounded-lg text-black text-2xl leading-none active:scale-90 flex items-center justify-center flex-shrink-0 font-bold"
                   style={{background:x.c}}>+</button>
               </div>
             </div>);
         })}
       </div>
 
+      {/* Friendslist läuft über die Namensliste */}
+      <div className="rounded-xl border border-violet-500/30 bg-violet-500/[.06] px-4 py-3 mb-4">
+        <div className="flex items-center gap-3">
+          <div className="flex-1 min-w-0">
+            <div className="mono text-[10px] font-bold text-violet-300">Friendslist · {eur(active.friendsPrice)} pro Person</div>
+            <div className="mono text-[10px] text-zinc-500 mt-0.5 leading-snug">
+              Kein Klicker — beim Abhaken im Tab GÄSTE gibst du Bar oder EC an, der Preis rechnet sich selbst.</div>
+          </div>
+          <div className="text-right flex-shrink-0">
+            <div className="bebas text-2xl text-violet-300 leading-none">{eur(fr.total)}</div>
+            <div className="mono text-[9px] text-zinc-600">{fr.people} Pers.{fr.free?` · ${fr.free} frei`:''}</div>
+          </div>
+        </div>
+        <div className="flex gap-4 mt-2 pt-2 border-t border-violet-500/20 mono text-[10px] text-zinc-500">
+          <span>EC {eur(fr.ec)}</span><span>Bar {eur(fr.bar)}</span>
+        </div>
+      </div>
+
       {/* Zwischensumme */}
       <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 px-4 py-3 mb-4">
-        <div className="flex justify-between mono text-[11px] text-zinc-400 mb-1"><span>EC</span><span>{eur(s.ec)}</span></div>
-        <div className="flex justify-between mono text-[11px] text-zinc-400 mb-2"><span>Bar</span><span>{eur(s.bar)}</span></div>
+        <div className="flex justify-between mono text-[11px] text-zinc-400 mb-1">
+          <span>Abendkasse EC</span><span>{eur(s.ec)}</span></div>
+        <div className="flex justify-between mono text-[11px] text-zinc-400 mb-2">
+          <span>Abendkasse Bar</span><span>{eur(s.bar)}</span></div>
         <div className="flex justify-between items-baseline border-t border-zinc-800 pt-2">
           <span className="mono text-[11px] text-zinc-300">Dieser Preisblock · {s.people} Gäste</span>
           <span className="bebas text-2xl text-emerald-400">{eur(s.total)}</span></div>
@@ -2124,7 +2250,7 @@ function Kasse({ev,base,role}){
         className="w-full border border-dashed border-zinc-700 text-zinc-400 mono text-xs py-3 rounded-xl active:bg-zinc-900 mb-5">
         ↻ Neuer Preis — Zähler beginnt von vorn</button>
 
-      <ClosedBlocks blocks={blocks.filter(b=>b.closedAt)}/>
+      <ClosedBlocks blocks={blocks.filter(b=>b.closedAt)} base={base} hasActive={true}/>
 
       <Sheet open={newPrice} onClose={()=>setNewPrice(false)} title="Neuer Preis">
         <div className="space-y-3">
@@ -2144,29 +2270,98 @@ function Kasse({ev,base,role}){
     </div>
   );
 }
-function ClosedBlocks({blocks}){
+function ClosedBlocks({blocks,base,hasActive}){
+  const [edit,setEdit]=useState(null);
   const done=blocks.filter(b=>b.closedAt);
   if(!done.length)return null;
   return(
     <div>
-      <SectionLabel>Abgeschlossene Preisblöcke</SectionLabel>
+      <SectionLabel right={<span className="mono text-[9px] text-zinc-700">antippen zum Korrigieren</span>}>
+        Abgeschlossene Preisblöcke</SectionLabel>
       <div className="space-y-2">
         {done.map(b=>{const s=blockSum(b);
           return(
-            <div key={b.id} className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-3.5 py-2.5">
+            <button key={b.id} onClick={()=>setEdit(b)}
+              className="w-full text-left rounded-xl border border-zinc-800 bg-zinc-900/40 px-3.5 py-2.5 active:bg-zinc-900">
               <div className="flex items-center gap-2">
                 <div className="flex-1 min-w-0">
                   <div className="mono text-[12px] font-bold text-zinc-300 truncate">{b.label}</div>
                   <div className="mono text-[10px] text-zinc-600">
                     {new Date(b.startedAt).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})}–
                     {new Date(b.closedAt).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})} ·
-                    {eur(b.price)} / {eur(b.friendsPrice)} · {s.people} Gäste</div>
+                    {eur(b.price)} · EC {b.counts?.ecNorm||0} · Bar {b.counts?.barNorm||0}</div>
                 </div>
                 <div className="mono text-sm font-bold text-zinc-200">{eur(s.total)}</div>
+                <span className="text-zinc-700 text-xs">✎</span>
               </div>
-            </div>);})}
+            </button>);})}
+      </div>
+      <BlockEdit b={edit} base={base} hasActive={hasActive} onClose={()=>setEdit(null)}/>
+    </div>);
+}
+/* Nachträglich korrigieren: Preis, Bezeichnung, Zählerstände */
+function BlockEdit({b,base,hasActive,onClose}){
+  const [f,setF]=useState({});
+  useEffect(()=>{ if(b)setF({label:b.label||'',price:String(b.price??''),friendsPrice:String(b.friendsPrice??''),
+    ecNorm:String(b.counts?.ecNorm??0),barNorm:String(b.counts?.barNorm??0)}); },[b]);
+  if(!b)return null;
+  const set=(k,v)=>setF(p=>({...p,[k]:v}));
+  const preview=blockSum({price:Number(f.price)||0,counts:{ecNorm:Number(f.ecNorm)||0,barNorm:Number(f.barNorm)||0}});
+  const save=()=>{
+    fbUpd(`${base}/kasse/blocks/${b.id}`,{
+      label:f.label.trim()||b.label,
+      price:Number(f.price)||0,
+      friendsPrice:Number(f.friendsPrice)||0,
+      counts:{ecNorm:Math.max(0,Number(f.ecNorm)||0),barNorm:Math.max(0,Number(f.barNorm)||0)},
+      editedAt:Date.now()});
+    onClose();
+  };
+  const Stepper=({label,k,color})=>(
+    <div className="rounded-xl border bg-zinc-900/70 p-3" style={{borderColor:color+'44'}}>
+      <div className="mono text-[11px] font-bold mb-2" style={{color}}>{label}</div>
+      <div className="flex items-center gap-2">
+        <button onClick={()=>set(k,String(Math.max(0,(Number(f[k])||0)-1)))}
+          className="w-10 h-10 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 text-xl active:bg-zinc-700">−</button>
+        <input value={f[k]} onChange={e=>set(k,e.target.value.replace(/\D/g,''))} inputMode="numeric"
+          className="flex-1 bg-zinc-800 border border-zinc-700 text-white bebas text-3xl text-center py-1 rounded-lg"/>
+        <button onClick={()=>set(k,String((Number(f[k])||0)+1))}
+          className="w-10 h-10 rounded-lg text-black text-xl font-bold active:scale-90" style={{background:color}}>+</button>
       </div>
     </div>);
+  return(
+    <Sheet open={!!b} onClose={onClose} title="Preisblock korrigieren"
+      onDelete={()=>{if(confirm(`Block „${b.label}" mit allen Zählerständen löschen?`)){fbDel(`${base}/kasse/blocks/${b.id}`);onClose();}}}>
+      <div className="space-y-3">
+        <div className="mono text-[10px] text-zinc-500 leading-relaxed">
+          {new Date(b.startedAt).toLocaleString('de-DE')} – {new Date(b.closedAt).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})} Uhr
+          {b.editedAt&&<span className="block text-amber-500/70">zuletzt korrigiert {new Date(b.editedAt).toLocaleString('de-DE')}</span>}
+        </div>
+        <Field label="Bezeichnung" value={f.label} onChange={v=>set('label',v)}/>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Eintritt normal" value={f.price} onChange={v=>set('price',v)} type="number"/>
+          <Field label="Friendslist" value={f.friendsPrice} onChange={v=>set('friendsPrice',v)} type="number"/>
+        </div>
+        <div className="mono text-[10px] text-zinc-500 uppercase tracking-wider pt-1">Zählerstände</div>
+        <div className="grid grid-cols-2 gap-2.5">
+          <Stepper label="EC" k="ecNorm" color="#60a5fa"/>
+          <Stepper label="Bar" k="barNorm" color="#34d399"/>
+        </div>
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 px-4 py-3 flex justify-between items-baseline">
+          <span className="mono text-[11px] text-zinc-400">neue Summe · {preview.people} Gäste</span>
+          <span className="bebas text-2xl text-emerald-400">{eur(preview.total)}</span>
+        </div>
+        <button onClick={save}
+          className="w-full bg-amber-500 text-black bebas text-xl py-3 rounded-xl tracking-widest active:scale-[.98]">SPEICHERN</button>
+        {!hasActive&&(
+          <button onClick={()=>{fbUpd(`${base}/kasse/blocks/${b.id}`,{closedAt:null});onClose();}}
+            className="w-full border border-zinc-700 text-zinc-400 mono text-xs py-2.5 rounded-xl active:bg-zinc-900">
+            Block wieder öffnen und weiterzählen</button>)}
+        <div className="mono text-[9px] text-zinc-600 leading-relaxed">
+          Die Friendslist wird nicht über diese Zähler abgerechnet — dort korrigierst du direkt beim Gast im Tab GÄSTE.
+        </div>
+      </div>
+    </Sheet>
+  );
 }
 
 /* ══ AUSZAHLUNGEN ════════════════════════════════════════════════════ */
@@ -2240,12 +2435,19 @@ function Abrechnung({ev,base,me,role}){
     L.push(`ABRECHNUNG — ${meta.name||'Event'}`);
     L.push(`${meta.date||''} · ${meta.city||''}`);
     L.push('');
-    L.push('PREISBLÖCKE');
+    L.push('ABENDKASSE (Klicker)');
     t.blocks.forEach(b=>{const s=blockSum(b);const cc=b.counts||{};
-      L.push(`  ${b.label} (${eur(b.price)} / Friends ${eur(b.friendsPrice)})`);
-      L.push(`    EC:  ${cc.ecNorm||0} normal, ${cc.ecFr||0} friends  = ${eur(s.ec)}`);
-      L.push(`    Bar: ${cc.barNorm||0} normal, ${cc.barFr||0} friends = ${eur(s.bar)}`);
-      L.push(`    Summe: ${eur(s.total)} · ${s.people} Gäste`);});
+      L.push(`  ${b.label} — ${eur(b.price)} p. P.`);
+      L.push(`    EC  ${cc.ecNorm||0} × = ${eur(s.ec)}`);
+      L.push(`    Bar ${cc.barNorm||0} × = ${eur(s.bar)}`);
+      L.push(`    Summe ${eur(s.total)} · ${s.people} Gäste`);});
+    L.push(`  Abendkasse gesamt  ${eur(t.kasseEc+t.kasseBar)} · ${t.kassePeople} Gäste`);
+    L.push('');
+    L.push('FRIENDSLIST (Namensliste)');
+    L.push(`  EC   ${eur(t.fr.ec)}`);
+    L.push(`  Bar  ${eur(t.fr.bar)}`);
+    L.push(`  Summe ${eur(t.fr.total)} · ${t.fr.people} Personen auf ${t.fr.count} Einträgen`);
+    if(t.fr.free)L.push(`  davon frei: ${t.fr.free} Personen`);
     L.push('');
     L.push(`EINNAHMEN EC    ${eur(t.ec)}`);
     L.push(`EINNAHMEN BAR   ${eur(t.bar)}`);
@@ -2291,11 +2493,27 @@ function Abrechnung({ev,base,me,role}){
             {new Date(st.confirmedAt).toLocaleString('de-DE')} · gesendet an {st.sentTo}</div>
         </div>)}
 
-      <SectionLabel>Einnahmen</SectionLabel>
+      <SectionLabel>Abendkasse</SectionLabel>
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 px-4 py-3 mb-3">
+        <Row l="EC" v={t.kasseEc}/>
+        <Row l="Bar" v={t.kasseBar}/>
+        <div className="mono text-[10px] text-zinc-600 mt-1">
+          {t.kassePeople} Gäste in {t.blocks.length} Preisblock{t.blocks.length===1?'':'en'}</div>
+      </div>
+
+      <SectionLabel>Friendslist</SectionLabel>
+      <div className="rounded-xl border border-violet-500/25 bg-violet-500/[.05] px-4 py-3 mb-3">
+        <Row l="EC" v={t.fr.ec}/>
+        <Row l="Bar" v={t.fr.bar}/>
+        <div className="mono text-[10px] text-zinc-600 mt-1">
+          {t.fr.people} Personen auf {t.fr.count} Einträgen{t.fr.free?` · ${t.fr.free} frei`:''}</div>
+      </div>
+
+      <SectionLabel>Einnahmen gesamt</SectionLabel>
       <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 px-4 py-3 mb-4">
         <Row l="EC-Zahlungen" v={t.ec}/>
         <Row l="Barzahlungen" v={t.bar}/>
-        <div className="mono text-[10px] text-zinc-600 mt-1">{t.people} zahlende Gäste in {t.blocks.length} Preisblock{t.blocks.length===1?'':'en'}</div>
+        <div className="mono text-[10px] text-zinc-600 mt-1">{t.people} zahlende Gäste</div>
         <Row l="Einnahmen gesamt" v={t.total} strong/>
       </div>
 
@@ -2523,6 +2741,57 @@ function Notes({ev,base,editable}){
   );
 }
 
+/* ══ ADRESSE → KOORDINATEN (OpenStreetMap) ═══════════════════════════ */
+async function geocode(q){
+  const url='https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&addressdetails=0&q='+encodeURIComponent(q);
+  const r=await fetch(url,{headers:{Accept:'application/json'}});
+  if(!r.ok)throw new Error('Suchdienst antwortet nicht ('+r.status+')');
+  const j=await r.json();
+  if(!j.length)throw new Error('Adresse nicht gefunden');
+  return{lat:parseFloat(j[0].lat),lng:parseFloat(j[0].lon),name:j[0].display_name};
+}
+/* Ein Ort: Name, Adresse, Koordinaten – mit automatischer Suche */
+function LocationBlock({icon,title,name,addr,lat,lng,onSet}){
+  const [busy,setBusy]=useState(false);
+  const [msg,setMsg]=useState(null);
+  const ok=Number.isFinite(+lat)&&Number.isFinite(+lng);
+  const find=async()=>{
+    const q=[addr,name].filter(Boolean).join(', ');
+    if(!q.trim()){setMsg({t:'err',m:'Trag zuerst die Adresse ein.'});return;}
+    setBusy(true);setMsg(null);
+    try{
+      const r=await geocode(q);
+      onSet({lat:r.lat,lng:r.lng});
+      setMsg({t:'ok',m:'Gefunden: '+r.name});
+    }catch(e){ setMsg({t:'err',m:e.message||String(e)}); }
+    finally{ setBusy(false); }
+  };
+  return(
+    <div className="space-y-3">
+      <Field label="Name" value={name} onChange={v=>onSet({name:v})}/>
+      <Field label="Adresse" value={addr} onChange={v=>onSet({addr:v})} placeholder="Straße Hausnummer, PLZ Ort"/>
+      <button onClick={find} disabled={busy}
+        className={`w-full mono text-xs py-2.5 rounded-xl border transition-all
+          ${busy?'border-zinc-800 text-zinc-600':'border-amber-500/40 bg-amber-500/10 text-amber-400 active:bg-amber-500/20'}`}>
+        {busy?'suche…':'📍 Koordinaten aus Adresse holen'}</button>
+      {msg&&(
+        <div className={`mono text-[10px] leading-relaxed ${msg.t==='ok'?'text-emerald-400':'text-amber-300'}`}>{msg.m}</div>)}
+      <div className="flex items-center gap-2">
+        <span className={`w-2 h-2 rounded-full flex-shrink-0 ${ok?'bg-emerald-500':'bg-red-500'}`}/>
+        <span className="mono text-[10px] text-zinc-500 flex-1">
+          {ok?`${(+lat).toFixed(5)}, ${(+lng).toFixed(5)} — erscheint auf der Karte`:'Noch kein Standort — dieser Punkt fehlt auf der Karte'}</span>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Lat (manuell)" value={lat} onChange={v=>onSet({lat:v===''?null:parseFloat(v)})} placeholder="51.5145"/>
+        <Field label="Lng (manuell)" value={lng} onChange={v=>onSet({lng:v===''?null:parseFloat(v)})} placeholder="7.4610"/>
+      </div>
+      <div className="mono text-[9px] text-zinc-600 leading-relaxed">
+        Klappt die Suche nicht: in Google Maps lange auf den Ort drücken, die beiden Zahlen erscheinen oben — hier eintragen.
+      </div>
+    </div>
+  );
+}
+
 /* ══ EVENT SETTINGS (VERWALTEN) ══════════════════════════════════════ */
 function Settings({ev,base,eventId,onDeleted}){
   const meta=ev.meta||{};
@@ -2576,25 +2845,20 @@ function Settings({ev,base,eventId,onDeleted}){
         </div>
       </div>
       <div>
-        <SectionLabel>Hotel</SectionLabel>
-        <div className="space-y-3">
-          <Field label="Name" value={meta.hotelName} onChange={v=>set('hotelName',v)}/>
-          <Field label="Adresse" value={meta.hotelAddr} onChange={v=>set('hotelAddr',v)}/>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Lat" value={meta.hotelLat} onChange={v=>set('hotelLat',parseFloat(v)||null)} placeholder="51.5085"/>
-            <Field label="Lng" value={meta.hotelLng} onChange={v=>set('hotelLng',parseFloat(v)||null)} placeholder="7.4685"/></div>
-        </div>
+        <SectionLabel>🏨 Hotel</SectionLabel>
+        <LocationBlock name={meta.hotelName} addr={meta.hotelAddr} lat={meta.hotelLat} lng={meta.hotelLng}
+          onSet={p=>{const m={};
+            if('name' in p)m.hotelName=p.name; if('addr' in p)m.hotelAddr=p.addr;
+            if('lat' in p)m.hotelLat=p.lat;    if('lng' in p)m.hotelLng=p.lng;
+            fbUpd(`${base}/meta`,m);}}/>
       </div>
       <div>
-        <SectionLabel>Venue</SectionLabel>
-        <div className="space-y-3">
-          <Field label="Name" value={meta.venueName} onChange={v=>set('venueName',v)}/>
-          <Field label="Adresse" value={meta.venueAddr} onChange={v=>set('venueAddr',v)}/>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Lat" value={meta.venueLat} onChange={v=>set('venueLat',parseFloat(v)||null)} placeholder="51.5145"/>
-            <Field label="Lng" value={meta.venueLng} onChange={v=>set('venueLng',parseFloat(v)||null)} placeholder="7.4610"/></div>
-          <div className="mono text-[10px] text-zinc-600 leading-relaxed">Koordinaten steuern die Karte. In Google Maps auf den Ort lange drücken → Zahlen kopieren.</div>
-        </div>
+        <SectionLabel>📍 Venue</SectionLabel>
+        <LocationBlock name={meta.venueName} addr={meta.venueAddr} lat={meta.venueLat} lng={meta.venueLng}
+          onSet={p=>{const m={};
+            if('name' in p)m.venueName=p.name; if('addr' in p)m.venueAddr=p.addr;
+            if('lat' in p)m.venueLat=p.lat;    if('lng' in p)m.venueLng=p.lng;
+            fbUpd(`${base}/meta`,m);}}/>
       </div>
       <div>
         <SectionLabel>Abrechnung</SectionLabel>
