@@ -1372,13 +1372,13 @@ function PaySheet({g,price,open,onClose,onDone}){
           <div className="mono text-[10px] text-zinc-500 uppercase tracking-wider mb-2">Wie viele Personen?</div>
           <div className="flex items-center gap-3">
             <button onClick={()=>setQty(n=>Math.max(1,n-1))}
-              className="w-12 h-12 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-200 text-2xl active:bg-zinc-700">−</button>
-            <div className="flex-1 text-center">
+              className="w-14 h-14 flex-shrink-0 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-200 text-2xl leading-none active:bg-zinc-700">−</button>
+            <div className="flex-1 min-w-0 text-center">
               <div className="bebas text-4xl text-white leading-none">{qty}</div>
               {(Number(g.plus)||0)>0&&<div className="mono text-[9px] text-zinc-600 mt-0.5">eingetragen: 1 +{g.plus}</div>}
             </div>
             <button onClick={()=>setQty(n=>n+1)}
-              className="w-12 h-12 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-200 text-2xl active:bg-zinc-700">+</button>
+              className="w-14 h-14 flex-shrink-0 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-200 text-2xl leading-none active:bg-zinc-700">+</button>
           </div>
         </div>
 
@@ -2200,17 +2200,17 @@ function Kasse({ev,base,role}){
         {CNT.map(x=>{
           const n=Number(c[x.k])||0;
           return(
-            <div key={x.k} className="rounded-xl border bg-zinc-900/70 p-3" style={{borderColor:x.c+'44'}}>
-              <div className="mono text-[11px] font-bold mb-2" style={{color:x.c}}>{x.l}</div>
-              <div className="flex items-center gap-2">
+            <div key={x.k} className="rounded-xl border bg-zinc-900/70 p-2.5 min-w-0" style={{borderColor:x.c+'44'}}>
+              <div className="flex items-baseline gap-1.5 mb-1">
+                <span className="mono text-[11px] font-bold" style={{color:x.c}}>{x.l}</span>
+                <span className="mono text-[9px] text-zinc-600 truncate">{eur(n*active.price)}</span>
+              </div>
+              <div className="bebas text-5xl leading-none text-center mb-2" style={{color:n?x.c:'#3f3f46'}}>{n}</div>
+              <div className="flex gap-2">
                 <button onClick={()=>fbInc(`${base}/kasse/blocks/${active.id}/counts/${x.k}`,-1)}
-                  className="w-11 h-11 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 text-2xl leading-none active:bg-zinc-700 flex items-center justify-center flex-shrink-0">−</button>
-                <div className="flex-1 text-center">
-                  <div className="bebas text-4xl leading-none" style={{color:n?x.c:'#3f3f46'}}>{n}</div>
-                  <div className="mono text-[9px] text-zinc-600">{eur(n*active.price)}</div>
-                </div>
+                  className="flex-1 h-12 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 text-2xl leading-none active:bg-zinc-700">−</button>
                 <button onClick={()=>fbInc(`${base}/kasse/blocks/${active.id}/counts/${x.k}`,1)}
-                  className="w-11 h-11 rounded-lg text-black text-2xl leading-none active:scale-90 flex items-center justify-center flex-shrink-0 font-bold"
+                  className="flex-1 h-12 rounded-lg text-black text-2xl leading-none font-bold active:scale-95"
                   style={{background:x.c}}>+</button>
               </div>
             </div>);
@@ -2317,15 +2317,16 @@ function BlockEdit({b,base,hasActive,onClose}){
     onClose();
   };
   const Stepper=({label,k,color})=>(
-    <div className="rounded-xl border bg-zinc-900/70 p-3" style={{borderColor:color+'44'}}>
+    <div className="rounded-xl border bg-zinc-900/70 p-2.5 min-w-0" style={{borderColor:color+'44'}}>
       <div className="mono text-[11px] font-bold mb-2" style={{color}}>{label}</div>
-      <div className="flex items-center gap-2">
+      <input value={f[k]} onChange={e=>set(k,e.target.value.replace(/\D/g,''))} inputMode="numeric"
+        className="w-full bg-zinc-800 border border-zinc-700 text-white bebas text-3xl text-center py-1.5 rounded-lg mb-2"/>
+      <div className="flex gap-2">
         <button onClick={()=>set(k,String(Math.max(0,(Number(f[k])||0)-1)))}
-          className="w-10 h-10 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 text-xl active:bg-zinc-700">−</button>
-        <input value={f[k]} onChange={e=>set(k,e.target.value.replace(/\D/g,''))} inputMode="numeric"
-          className="flex-1 bg-zinc-800 border border-zinc-700 text-white bebas text-3xl text-center py-1 rounded-lg"/>
+          className="flex-1 h-10 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 text-xl leading-none active:bg-zinc-700">−</button>
         <button onClick={()=>set(k,String((Number(f[k])||0)+1))}
-          className="w-10 h-10 rounded-lg text-black text-xl font-bold active:scale-90" style={{background:color}}>+</button>
+          className="flex-1 h-10 rounded-lg text-black text-xl leading-none font-bold active:scale-95"
+          style={{background:color}}>+</button>
       </div>
     </div>);
   return(
@@ -2742,13 +2743,29 @@ function Notes({ev,base,editable}){
 }
 
 /* ══ ADRESSE → KOORDINATEN (OpenStreetMap) ═══════════════════════════ */
-async function geocode(q){
-  const url='https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&addressdetails=0&q='+encodeURIComponent(q);
+const nomi=async q=>{
+  const url='https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=de,at,ch,nl,be&q='+encodeURIComponent(q);
   const r=await fetch(url,{headers:{Accept:'application/json'}});
   if(!r.ok)throw new Error('Suchdienst antwortet nicht ('+r.status+')');
   const j=await r.json();
-  if(!j.length)throw new Error('Adresse nicht gefunden');
-  return{lat:parseFloat(j[0].lat),lng:parseFloat(j[0].lon),name:j[0].display_name};
+  return j.length?{lat:parseFloat(j[0].lat),lng:parseFloat(j[0].lon),name:j[0].display_name}:null;
+};
+/* Mehrere Schreibweisen nacheinander probieren — Adresse allein trifft am besten,
+   der Ortsname als Zusatz lässt die Suche dagegen oft ins Leere laufen. */
+async function geocode(addr,name){
+  const a=(addr||'').trim(), n=(name||'').trim();
+  const noHnr=a.replace(/(\d+)[a-zA-Z](?![\wäöüß])/,'$1');   // "2A" → "2", lässt "50679 Köln" in Ruhe
+  const noStreetNr=a.replace(/\s+\d+[a-zA-Z]?(?=\s*,)/,'');  // Hausnummer weg, PLZ bleibt
+  const tries=[a, noHnr, n&&a?`${n}, ${a}`:'', n, noStreetNr]
+    .map(s=>(s||'').trim()).filter((s,i,arr)=>s&&arr.indexOf(s)===i);
+  let lastErr=null;
+  for(const q of tries){
+    try{ const r=await nomi(q); if(r)return{...r,used:q}; }
+    catch(e){ lastErr=e; }
+    await new Promise(r=>setTimeout(r,350));                  // freundlich zum Dienst
+  }
+  if(lastErr)throw lastErr;
+  throw new Error('Adresse nicht gefunden');
 }
 /* Ein Ort: Name, Adresse, Koordinaten – mit automatischer Suche */
 function LocationBlock({icon,title,name,addr,lat,lng,onSet}){
@@ -2756,14 +2773,16 @@ function LocationBlock({icon,title,name,addr,lat,lng,onSet}){
   const [msg,setMsg]=useState(null);
   const ok=Number.isFinite(+lat)&&Number.isFinite(+lng);
   const find=async()=>{
-    const q=[addr,name].filter(Boolean).join(', ');
-    if(!q.trim()){setMsg({t:'err',m:'Trag zuerst die Adresse ein.'});return;}
+    if(!(addr||'').trim()&&!(name||'').trim()){setMsg({t:'err',m:'Trag zuerst die Adresse ein.'});return;}
     setBusy(true);setMsg(null);
     try{
-      const r=await geocode(q);
+      const r=await geocode(addr,name);
       onSet({lat:r.lat,lng:r.lng});
       setMsg({t:'ok',m:'Gefunden: '+r.name});
-    }catch(e){ setMsg({t:'err',m:e.message||String(e)}); }
+    }catch(e){
+      setMsg({t:'err',m:(e.message||String(e))+
+        ' — prüf die Schreibweise, oder trag die Zahlen unten von Hand ein.'});
+    }
     finally{ setBusy(false); }
   };
   return(
