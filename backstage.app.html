@@ -153,6 +153,15 @@ const ROLE_MAP = {
   fahrer:'fahrer',
   artistcare:'artistcare', care:'artistcare',
 };
+/* Reihenfolge bestimmt, welche Rolle als Hauptrolle gilt */
+const ROLE_ORDER = ['superadmin','leitung','artistcare','einlass','fahrer'];
+/* Alle Rollen einer Person — neues Feld „roles", sonst das alte einzelne „role" */
+const userRoles = u => {
+  if(!u) return [];
+  const raw = u.roles ? Object.keys(u.roles).filter(k=>u.roles[k]) : (u.role?[u.role]:[]);
+  const mapped = [...new Set(raw.map(r=>ROLE_MAP[r]).filter(Boolean))];
+  return ROLE_ORDER.filter(r=>mapped.includes(r));
+};
 const AUTH_ERRORS = {
   'auth/invalid-email':'Keine gültige E-Mail-Adresse.',
   'auth/user-not-found':'Kein Konto mit dieser E-Mail.',
@@ -1120,9 +1129,12 @@ function Lineup({ev,base,editable}){
         })}
         {editable&&<div className="pt-1"><AddBtn onClick={()=>setEdit({_new:true,day,floor:floor==='ALL'?floors[0]:floor,setStart:'',setEnd:'',name:''})}>Artist hinzufügen</AddBtn></div>}
       </div>
-      <ArtistSheet a={edit} meta={meta} onClose={()=>setEdit(null)}
-        onSave={(id,data)=>{fbSet(`${base}/artists/${id}`,data);setEdit(null);}}
-        onDelete={id=>{fbDel(`${base}/artists/${id}`);fbDel(`${base}/status/${id}`);setEdit(null);}}/>
+      <ArtistSheet a={edit} meta={meta} ev={ev} base={base} onClose={()=>setEdit(null)}
+        onDelete={id=>{
+          fbDel(`${base}/artists/${id}`);fbDel(`${base}/status/${id}`);
+          fbDel(`${base}/travel/i_${id}`);fbDel(`${base}/travel/o_${id}`);
+          obj2arr(ev.pickups).filter(p=>p.artistId===id).forEach(p=>fbDel(`${base}/pickups/${p.id}`));
+          setEdit(null);}}/>
     </div>
   );
 }
@@ -1168,15 +1180,119 @@ function RiderBlock({a,base,editable}){
     </div>
   );
 }
-function ArtistSheet({a,meta,onClose,onSave,onDelete}){
+const dayShort=d=>((String(d||'').match(/(\d{1,2}\.\d{1,2})/)||[])[1])||String(d||'');
+/* Über uns / extern / selbst — plus passende Detailauswahl */
+function ByPicker({by,mode,onSet}){
+  const cur=by||'self';
+  return(
+    <div>
+      <div className="flex gap-1.5 mb-1.5">
+        {Object.entries(BY).map(([k,B])=>(
+          <button key={k} onClick={()=>onSet({by:k,mode:MODE_OPTS[k][0]})}
+            className="flex-1 py-2 rounded-lg mono text-[10px] font-bold border transition-all active:scale-95"
+            style={cur===k
+              ?{color:B.c,borderColor:B.c+'66',background:B.c+'1a'}
+              :{color:'#71717a',borderColor:'#27272a',background:'#18181b'}}>
+            {B.ic} {B.l}</button>))}
+      </div>
+      <div className="mono text-[9px] mb-1.5" style={{color:BY[cur].c+'cc'}}>{BY[cur].hint}</div>
+      <select value={mode||''} onChange={e=>onSet({mode:e.target.value})}
+        className="w-full bg-zinc-800 border border-zinc-700 text-zinc-300 mono text-xs px-2 py-2 rounded">
+        {(MODE_OPTS[cur]||[]).map(m=><option key={m} value={m}>{m}</option>)}
+        {mode&&!(MODE_OPTS[cur]||[]).includes(mode)&&<option value={mode}>{mode}</option>}
+      </select>
+    </div>
+  );
+}
+/* An- bzw. Abreise direkt im Artist-Formular */
+function TravelPart({dir,t,onToggle,onSet,days}){
+  const isIn=dir==='in';
+  const col=isIn?'#34d399':'#f472b6';
+  const inp=(k,ph,cls='')=>(
+    <input value={t?.[k]??''} onChange={e=>onSet({[k]:e.target.value})} placeholder={ph}
+      className={`bg-zinc-800 border border-zinc-700 text-white mono text-xs px-2 py-2 rounded focus:border-amber-500 placeholder-zinc-600 min-w-0 ${cls}`}/>);
+  return(
+    <div className="border-t border-zinc-800 pt-3">
+      <button onClick={onToggle} className="flex items-center gap-2 w-full mb-2">
+        <span className="w-4 h-4 rounded border flex items-center justify-center flex-shrink-0"
+          style={{borderColor:t?col:'#52525b',background:t?col:'transparent'}}>
+          {t&&<span className="text-black text-[9px] font-black">✓</span>}</span>
+        <span className="text-[10px] mono uppercase tracking-wider flex-1 text-left" style={{color:t?col:'#71717a'}}>
+          {isIn?'↓ Anreise':'↑ Abreise'}</span>
+        <span className="mono text-[9px] text-zinc-600">{t?'wird eingetragen':'antippen zum Eintragen'}</span>
+      </button>
+      {t&&(
+        <div className="space-y-2 fade">
+          <div className="flex gap-2">
+            {inp('time',isIn?'Ankunft 11:50':'Abfahrt 16:30','w-24')}
+            <select value={t.day||''} onChange={e=>onSet({day:e.target.value})}
+              className="flex-1 min-w-0 bg-zinc-800 border border-zinc-700 text-zinc-300 mono text-xs px-2 py-2 rounded">
+              <option value="">Datum…</option>
+              {[...new Set((days||[]).map(dayShort))].map(d=><option key={d} value={d}>{d}</option>)}
+            </select>
+          </div>
+          <ByPicker by={travelBy(t)} mode={t.mode} onSet={onSet}/>
+          <div className="flex gap-2 items-center">
+            {inp('from',isIn?'Flughafen / HBF':'Hotel','flex-1')}
+            <span className="text-amber-500 text-xs flex-shrink-0">→</span>
+            {inp('to',isIn?'Hotel':'Flughafen / HBF','flex-1')}
+          </div>
+          {travelBy(t)!=='self'&&inp('driver',
+            travelBy(t)==='own'?'Welcher Fahrer? Name':'Anbieter / Buchungsnummer','w-full')}
+          {inp('notes','Flugnummer, Zug, Hinweise','w-full')}
+        </div>)}
+    </div>
+  );
+}
+function ArtistSheet({a,meta,ev,base,onClose,onDelete}){
   const [f,setF]=useState({});
-  useEffect(()=>{if(a)setF({name:'',day:'',floor:'',setStart:'',setEnd:'',soundcheck:'',contactName:'',contactPhone:'',notes:'',rider:'',tech:'',...a});},[a]);
+  const [inb,setInb]=useState(null);      // null = keine Anreise hinterlegt
+  const [outb,setOutb]=useState(null);
+  const [grounds,setGrounds]=useState([]);
+  const [dropped,setDropped]=useState([]); // gelöschte Grounds
+
+  useEffect(()=>{
+    if(!a)return;
+    setF({name:'',day:'',floor:'',setStart:'',setEnd:'',soundcheck:'',
+      contactName:'',contactPhone:'',notes:'',rider:'',tech:'',...a});
+    const tv=ev?.travel||{};
+    setInb(a.id&&tv['i_'+a.id]?{...tv['i_'+a.id]}:null);
+    setOutb(a.id&&tv['o_'+a.id]?{...tv['o_'+a.id]}:null);
+    setGrounds(a.id?obj2arr(ev?.pickups).filter(p=>p.artistId===a.id):[]);
+    setDropped([]);
+  },[a]);
+
   if(!a)return null;
   const set=(k,v)=>setF(p=>({...p,[k]:v}));
+  const dShort=dayShort(f.day);
+
+  const blankTravel=dir=>({dir,day:dShort,artist:f.name||'',contact:f.contactName||'',
+    phone:f.contactPhone||'',mode:'Royal Transfer',
+    from:dir==='in'?'':'Hotel',to:dir==='in'?'Hotel':'',time:'',driver:'',notes:'',done:false});
+
   const save=()=>{
     const {id,_new,...rest}=f;
     if(!rest.name?.trim())return;
-    onSave(a._new?'a'+uid():a.id,rest);
+    const aid=a._new?'a'+uid():a.id;
+    fbSet(`${base}/artists/${aid}`,rest);
+    /* An- und Abreise mit fester ID am Artist hängen */
+    [['i',inb],['o',outb]].forEach(([p,t])=>{
+      const path=`${base}/travel/${p}_${aid}`;
+      if(t) fbSet(path,{...t,artist:t.artist||rest.name,
+        contact:t.contact||rest.contactName||'',phone:t.phone||rest.contactPhone||'',
+        artistId:aid,dir:p==='i'?'in':'out'});
+      else fbDel(path);
+    });
+    /* Grounds */
+    dropped.forEach(gid=>fbDel(`${base}/pickups/${gid}`));
+    grounds.forEach(g=>{
+      const gid=g.id||('p'+uid());
+      const {id:_i,...rest2}=g;
+      fbSet(`${base}/pickups/${gid}`,{...rest2,artistId:aid,
+        label:rest2.label?.trim()||rest.name,day:rest2.day||f.day,
+        from:rest2.from||'Hotel',to:rest2.to||'Venue',done:!!rest2.done});
+    });
+    onClose();
   };
   return(
     <Sheet open={!!a} onClose={onClose} title={a._new?'Neuer Artist':'Artist bearbeiten'}
@@ -1210,6 +1326,56 @@ function ArtistSheet({a,meta,onClose,onSave,onDelete}){
         <label className="block"><div className="text-violet-400/80 text-[10px] mono uppercase tracking-wider mb-1">🎛 Techrider</div>
           <textarea value={f.tech??''} onChange={e=>set('tech',e.target.value)} rows={3} placeholder="A&H 96 · 4x CDJ 3000"
             className="w-full bg-zinc-900 border border-zinc-700 text-zinc-100 mono text-xs px-3 py-2.5 rounded-lg focus:border-violet-500 placeholder-zinc-700 resize-none leading-relaxed"/></label>
+
+        {/* ── Anreise ── */}
+        <TravelPart dir="in" t={inb} onToggle={()=>setInb(inb?null:blankTravel('in'))}
+          onSet={p=>setInb(x=>({...x,...p}))} days={meta.days}/>
+
+        {/* ── Abreise ── */}
+        <TravelPart dir="out" t={outb} onToggle={()=>setOutb(outb?null:blankTravel('out'))}
+          onSet={p=>setOutb(x=>({...x,...p}))} days={meta.days}/>
+
+        {/* ── Grounds ── */}
+        <div className="border-t border-zinc-800 pt-3">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="text-blue-400/80 text-[10px] mono uppercase tracking-wider flex-1">🚐 Grounds vor Ort</div>
+            <span className="mono text-[9px] text-zinc-600">{grounds.length}</span>
+          </div>
+          <div className="space-y-2">
+            {grounds.map((g,i)=>(
+              <div key={i} className="bg-zinc-900 border border-zinc-800 rounded-lg p-2.5 space-y-2">
+                <div className="flex gap-2">
+                  <input value={g.time||''} onChange={e=>setGrounds(l=>l.map((x,j)=>j===i?{...x,time:e.target.value}:x))}
+                    placeholder="21:15" inputMode="numeric"
+                    className="w-20 bg-zinc-800 border border-zinc-700 text-white mono text-sm px-2 py-2 rounded text-center focus:border-blue-500 placeholder-zinc-600"/>
+                  <input value={g.label||''} onChange={e=>setGrounds(l=>l.map((x,j)=>j===i?{...x,label:e.target.value}:x))}
+                    placeholder={f.name||'Bezeichnung'}
+                    className="flex-1 min-w-0 bg-zinc-800 border border-zinc-700 text-white mono text-sm px-2 py-2 rounded focus:border-blue-500 placeholder-zinc-600"/>
+                  <button onClick={()=>{ if(g.id)setDropped(d=>[...d,g.id]); setGrounds(l=>l.filter((_,j)=>j!==i)); }}
+                    className="text-zinc-600 mono text-xs px-1.5 active:text-red-400">✕</button>
+                </div>
+                <div className="flex gap-2 items-center">
+                  <input value={g.from||''} onChange={e=>setGrounds(l=>l.map((x,j)=>j===i?{...x,from:e.target.value}:x))}
+                    placeholder="Hotel"
+                    className="flex-1 min-w-0 bg-zinc-800 border border-zinc-700 text-white mono text-xs px-2 py-1.5 rounded focus:border-blue-500 placeholder-zinc-600"/>
+                  <span className="text-amber-500 text-xs flex-shrink-0">→</span>
+                  <input value={g.to||''} onChange={e=>setGrounds(l=>l.map((x,j)=>j===i?{...x,to:e.target.value}:x))}
+                    placeholder="Venue"
+                    className="flex-1 min-w-0 bg-zinc-800 border border-zinc-700 text-white mono text-xs px-2 py-1.5 rounded focus:border-blue-500 placeholder-zinc-600"/>
+                  <select value={g.day||f.day||''} onChange={e=>setGrounds(l=>l.map((x,j)=>j===i?{...x,day:e.target.value}:x))}
+                    className="bg-zinc-800 border border-zinc-700 text-zinc-300 mono text-[10px] px-1.5 py-1.5 rounded flex-shrink-0 max-w-[90px]">
+                    {(meta.days||[]).map(d=><option key={d} value={d}>{d}</option>)}</select>
+                </div>
+              </div>))}
+            <button onClick={()=>setGrounds(l=>[...l,{time:'',label:f.name||'',from:'Hotel',to:'Venue',day:f.day||''}])}
+              className="w-full border border-dashed border-zinc-700 text-zinc-500 mono text-[11px] py-2 rounded-lg active:bg-zinc-900">
+              + Transfer hinzufügen</button>
+          </div>
+          <div className="mono text-[9px] text-zinc-600 mt-1.5 leading-relaxed">
+            Fahrten während des Events, etwa Hotel → Venue vor dem Set. Erscheinen bei den Pickups und beim Fahrer.
+          </div>
+        </div>
+
         <button onClick={save} className="w-full bg-amber-500 text-black bebas text-xl py-3 rounded-xl tracking-widest active:scale-[.98]">SPEICHERN</button>
       </div>
     </Sheet>
@@ -1218,6 +1384,7 @@ function ArtistSheet({a,meta,onClose,onSave,onDelete}){
 
 /* ══ PICKUPS ═════════════════════════════════════════════════════════ */
 function Pickups({ev,base,editable,role}){
+  const drivers=useDrivers();
   const meta=ev.meta||{};const days=meta.days||[];
   const [day,setDay]=useState('ALL');
   const [edit,setEdit]=useState(null);
@@ -1251,6 +1418,11 @@ function Pickups({ev,base,editable,role}){
                     {p.day} · {p.from||'Hotel'} → {p.to||'Venue'}
                     {p.done&&p.doneAt&&<span className="text-emerald-500/70"> · ✓ {new Date(p.doneAt).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})}</span>}
                   </div>
+                  <div className="mono text-[10px] mt-0.5">
+                    <span className="text-zinc-600">Fahrer: </span>
+                    <span className={p.assignedTo?'text-blue-300':'text-zinc-500'}>
+                      {p.assignedTo?(drivers.find(d=>d.uid===p.assignedTo)?.name||'unbekannt'):'alle'}</span>
+                  </div>
                 </div>
                 <TimeEdit value={p.time} onSave={v=>upd(p.id,{time:v})}/>
                 {editable&&<button onClick={()=>setEdit(p)} className="text-zinc-600 text-xs px-1 active:text-amber-400">✎</button>}
@@ -1267,8 +1439,9 @@ function Pickups({ev,base,editable,role}){
   );
 }
 function PickupSheet({p,meta,onClose,onSave,onDelete}){
+  const drivers=useDrivers();
   const [f,setF]=useState({});
-  useEffect(()=>{if(p)setF({label:'',time:'',day:'',from:'Hotel',to:'Venue',done:false,notes:'',...p});},[p]);
+  useEffect(()=>{if(p)setF({label:'',time:'',day:'',from:'Hotel',to:'Venue',done:false,notes:'',assignedTo:null,...p});},[p]);
   if(!p)return null;
   const set=(k,v)=>setF(x=>({...x,[k]:v}));
   return(
@@ -1287,6 +1460,7 @@ function PickupSheet({p,meta,onClose,onSave,onDelete}){
           <Field label="Von" value={f.from} onChange={v=>set('from',v)} placeholder="Hotel"/>
           <Field label="Nach" value={f.to}  onChange={v=>set('to',v)}   placeholder="Venue"/>
         </div>
+        <AssignPicker value={f.assignedTo} onSet={v=>set('assignedTo',v)} drivers={drivers}/>
         <button onClick={()=>{const{id,_new,...r}=f;if(r.label?.trim())onSave(p._new?'p'+uid():p.id,r);}}
           className="w-full bg-amber-500 text-black bebas text-xl py-3 rounded-xl tracking-widest active:scale-[.98]">SPEICHERN</button>
       </div>
@@ -1479,7 +1653,7 @@ function GuestRow({g,path,isFriends,onCheckIn}){
 }
 
 /* ══ FAHRER ══════════════════════════════════════════════════════════ */
-function FahrerPanel({ev,base,driverId}){
+function FahrerPanel({ev,base,driverId,account}){
   const meta=ev.meta||{};
   const me=(ev.drivers||{})[driverId]||{};
   const [name,setName]=useState(me.name||localStorage.getItem('uo-drivername')||'');
@@ -1534,8 +1708,14 @@ function FahrerPanel({ev,base,driverId}){
   };
   const days=meta.days||[];
   const dIdx=d=>{const i=days.indexOf(d);return i<0?999:i;};
-  const list=obj2arr(ev.pickups).sort((a,b)=>
+  /* Nur was mir zugeteilt ist — oder niemandem */
+  const myUid=account?.uid||driverId;
+  const mine=x=>!x.assignedTo||x.assignedTo===myUid;
+  const [onlyMine,setOnlyMine]=useState(true);
+  const allP=obj2arr(ev.pickups).sort((a,b)=>
     (dIdx(a.day)-dIdx(b.day))||(toMins(a.time)-toMins(b.time)));
+  const list=onlyMine?allP.filter(mine):allP;
+  const hidden=allP.length-allP.filter(mine).length;
   const next=list.find(p=>!p.done);
   return(
     <div className="pb-24 pt-4 px-4">
@@ -1583,7 +1763,17 @@ function FahrerPanel({ev,base,driverId}){
           <div className="mono text-[11px] text-zinc-500 mt-0.5">{next.day} · {next.from} → {next.to}</div>
         </div>
       )}
-      <SectionLabel right={<span className="mono text-[10px] text-zinc-600">{list.filter(p=>!p.done).length} offen</span>}>Transfers</SectionLabel>
+      {hidden>0&&(
+        <div className="flex gap-2 mb-3">
+          <button onClick={()=>setOnlyMine(true)}
+            className={`flex-1 py-2 rounded-lg mono text-[11px] border ${onlyMine?'bg-amber-500/10 border-amber-500/40 text-amber-400':'bg-zinc-900 border-zinc-800 text-zinc-500'}`}>
+            meine Fahrten</button>
+          <button onClick={()=>setOnlyMine(false)}
+            className={`flex-1 py-2 rounded-lg mono text-[11px] border ${!onlyMine?'bg-zinc-800 border-zinc-600 text-zinc-200':'bg-zinc-900 border-zinc-800 text-zinc-500'}`}>
+            alle ({allP.length})</button>
+        </div>)}
+      <SectionLabel right={<span className="mono text-[10px] text-zinc-600">{list.filter(p=>!p.done).length} offen</span>}>
+        Transfers{onlyMine&&hidden>0?` · ${hidden} für andere ausgeblendet`:''}</SectionLabel>
       <div className="space-y-2 mb-6">
         {list.length===0&&<Empty>Keine Transfers eingetragen.</Empty>}
         {list.map(p=>(
@@ -1600,13 +1790,13 @@ function FahrerPanel({ev,base,driverId}){
       </div>
       {/* An- und Abreisen sind auch Fahrten */}
       {(()=>{
-        const tr=obj2arr(ev.travel).filter(t=>/Royal|Fahrer|Taxi/i.test(t.mode||''))
+        const tr=obj2arr(ev.travel).filter(t=>travelBy(t)==='own').filter(t=>!onlyMine||mine(t))
           .sort((a,b)=>(a.day||'').localeCompare(b.day||'')||toMins(a.time)-toMins(b.time));
         if(!tr.length)return null;
         return(
           <div className="mb-6">
             <SectionLabel right={<span className="mono text-[10px] text-zinc-600">{tr.filter(t=>!t.done).length} offen</span>}>
-              An- &amp; Abreisen mit Fahrdienst</SectionLabel>
+              An- &amp; Abreisen, die wir fahren</SectionLabel>
             <div className="space-y-2">
               {tr.map(t=>(
                 <div key={t.id} className={`rounded-xl border px-3.5 py-3 flex items-start gap-3 transition-all
@@ -2015,15 +2205,58 @@ function Runsheet({ev,base}){
   );
 }
 
+/* ══ ZUTEILUNG AN FAHRER ═════════════════════════════════════════════ */
+/* Alle Konten mit Fahrer-Rolle — für die Zuteilung von Fahrten */
+function useDrivers(){
+  const [list,setList]=useState([]);
+  useEffect(()=>fbOn(USERS,d=>{
+    setList(obj2arr(d).filter(u=>userRoles(u).includes('fahrer'))
+      .map(u=>({uid:u.uid||u.id,name:u.name||u.email||'Fahrer'}))
+      .sort((a,b)=>a.name.localeCompare(b.name)));
+  },()=>setList([])),[]);
+  return list;
+}
+function AssignPicker({value,onSet,drivers,compact}){
+  const cur=drivers.find(d=>d.uid===value);
+  if(compact)return(
+    <select value={value||''} onChange={e=>onSet(e.target.value||null)}
+      className="bg-zinc-800 border border-zinc-700 text-zinc-300 mono text-[10px] px-1.5 py-1 rounded max-w-[120px]">
+      <option value="">niemand</option>
+      {drivers.map(d=><option key={d.uid} value={d.uid}>{d.name}</option>)}
+      {value&&!cur&&<option value={value}>unbekannt</option>}
+    </select>);
+  return(
+    <label className="block">
+      <div className="text-zinc-500 text-[10px] mono uppercase tracking-wider mb-1">Zugeteilt an</div>
+      <select value={value||''} onChange={e=>onSet(e.target.value||null)}
+        className="w-full bg-zinc-900 border border-zinc-700 text-zinc-100 mono text-sm px-3 py-2.5 rounded-lg focus:border-amber-500">
+        <option value="">— alle Fahrer sehen es —</option>
+        {drivers.map(d=><option key={d.uid} value={d.uid}>{d.name}</option>)}
+        {value&&!cur&&<option value={value}>unbekannte Person</option>}
+      </select>
+      <div className="mono text-[9px] text-zinc-600 mt-1 leading-relaxed">
+        Ohne Zuteilung steht die Fahrt bei allen Fahrern. Mit Zuteilung nur bei der gewählten Person.
+      </div>
+    </label>);
+}
+
 /* ══ TRAVEL · AN- & ABREISE ══════════════════════════════════════════ */
 const MODES=['Royal Transfer','Eigener Fahrer','Zu Fuß','Taxi','Eigene Anreise (Auto)','Eigene Abreise (Auto)','Flug','Bahn','offen'];
-const modeStyle=m=>{
-  if(/Royal|Fahrer|Taxi/i.test(m||''))return{t:'text-blue-300',b:'border-blue-500/40',bg:'bg-blue-500/10',i:'🚐'};
-  if(/Flug/i.test(m||''))            return{t:'text-violet-300',b:'border-violet-500/40',bg:'bg-violet-500/10',i:'✈️'};
-  if(/Bahn|Fuß/i.test(m||''))        return{t:'text-emerald-300',b:'border-emerald-500/40',bg:'bg-emerald-500/10',i:'🚶'};
-  if(/Eigene/i.test(m||''))          return{t:'text-zinc-400',b:'border-zinc-600',bg:'bg-zinc-800/60',i:'🚗'};
-  return{t:'text-amber-300',b:'border-amber-500/40',bg:'bg-amber-500/10',i:'❓'};
+/* Wer fährt? Entscheidet, ob die Fahrt bei unseren Fahrern auftaucht. */
+const BY={
+  own:   {l:'Über uns',    ic:'🚐', c:'#3b82f6', hint:'Steht in der Fahrtenliste unserer Fahrer'},
+  extern:{l:'Extern',      ic:'🚕', c:'#f59e0b', hint:'Taxi, Uber, Fahrservice — wir fahren nicht'},
+  self:  {l:'Reist selbst',ic:'🚶', c:'#71717a', hint:'Zu Fuß, eigenes Auto, Bahn — nichts zu tun'},
 };
+const MODE_OPTS={
+  own:   ['Eigener Fahrer','Shuttle','offen'],
+  extern:['Royal Transfer','Taxi','Uber','Fahrservice','Hotel-Shuttle','offen'],
+  self:  ['Zu Fuß','Eigenes Auto','Bahn','Flug','offen'],
+};
+/* Altbestand ohne Feld „by" sinnvoll einordnen */
+const byFromMode=m=>/eigener fahrer|shuttle/i.test(m||'')?'own'
+  :/royal|taxi|uber|fahrservice|transfer/i.test(m||'')?'extern':'self';
+const travelBy=t=>t?.by||byFromMode(t?.mode);
 function Travel({ev,base,editable}){
   const [dir,setDir]=useState('in');
   const [day,setDay]=useState('ALL');
@@ -2033,7 +2266,7 @@ function Travel({ev,base,editable}){
     .filter(t=>day==='ALL'||t.day===day)
     .sort((a,b)=>(a.day||'').localeCompare(b.day||'')||toMins(a.time)-toMins(b.time)||(a.artist||'').localeCompare(b.artist||''));
   const dayChips=[...new Set(all.filter(t=>t.dir===dir).map(t=>t.day))].sort();
-  const needsDriver=all.filter(t=>t.dir===dir&&/Royal|Fahrer|Taxi/i.test(t.mode||'')).length;
+  const needsDriver=all.filter(t=>t.dir===dir&&travelBy(t)==='own').length;
   const openN=rows.filter(t=>!t.done).length;
   const upd=(id,p)=>fbUpd(`${base}/travel/${id}`,p);
   useEffect(()=>setDay('ALL'),[dir]);
@@ -2057,15 +2290,15 @@ function Travel({ev,base,editable}){
         </div>
       )}
       <div className="px-4">
-        <SectionLabel right={<span className="mono text-[10px] text-zinc-600">{openN} offen · 🚐 {needsDriver} mit Fahrer</span>}>
+        <SectionLabel right={<span className="mono text-[10px] text-zinc-600">{openN} offen · 🚐 {needsDriver} über uns</span>}>
           {rows.length} {dir==='in'?'Ankünfte':'Abfahrten'}</SectionLabel>
         <div className="space-y-2">
           {rows.length===0&&(
             <Empty>Noch keine {dir==='in'?'Anreisen':'Abreisen'} eingetragen.
               {editable&&'\nMit + unten hinzufügen.'}</Empty>)}
           {rows.map(t=>{
-            const ms=modeStyle(t.mode);
-            const drive=/Royal|Fahrer|Taxi/i.test(t.mode||'');
+            const by=travelBy(t), B=BY[by];
+            const drive=by==='own';
             return(
               <div key={t.id} className={`rounded-xl border transition-all
                 ${t.done?'border-zinc-800/40 bg-zinc-900/25 opacity-45':drive?'border-blue-500/25 bg-blue-950/15':'border-zinc-800 bg-zinc-900/55'}`}>
@@ -2074,7 +2307,9 @@ function Travel({ev,base,editable}){
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className={`mono text-sm font-bold truncate ${t.done?'text-zinc-600 line-through':'text-zinc-100'}`}>{t.artist}</span>
-                      <span className={`mono text-[9px] px-1.5 py-0.5 rounded border ${ms.t} ${ms.b} ${ms.bg}`}>{ms.i} {t.mode}</span>
+                      <span className="mono text-[9px] px-1.5 py-0.5 rounded border"
+                        style={{color:B.c,borderColor:B.c+'55',background:B.c+'14'}}>{B.ic} {B.l}</span>
+                      {t.mode&&<span className="mono text-[9px] text-zinc-500">{t.mode}</span>}
                       <span className="mono text-[10px] text-zinc-600">{t.day}</span>
                       {editable&&<button onClick={()=>setEdit(t)} className="ml-auto text-zinc-600 text-xs px-1 active:text-amber-400">✎</button>}
                     </div>
@@ -2092,8 +2327,11 @@ function Travel({ev,base,editable}){
                     {/* Wer bringt ihn */}
                     <div className="mt-1.5 mono text-[10px] leading-snug">
                       <span className="text-zinc-600">Zuständig: </span>
-                      <span className={drive?'text-blue-300':'text-zinc-500'}>
-                        {t.driver||(drive?'⚠️ noch kein Fahrer zugeteilt':'reist selbstständig')}</span>
+                      <span style={{color:by==='self'?'#71717a':B.c}}>
+                        {t.driver
+                          ||(by==='own'?'⚠️ noch kein Fahrer zugeteilt'
+                            :by==='extern'?'⚠️ Anbieter noch offen'
+                            :'reist selbstständig')}</span>
                     </div>
                     {t.notes&&<div className="mono text-[10px] text-zinc-500 mt-1">{t.notes}</div>}
                     {t.phone&&(
@@ -2126,6 +2364,7 @@ function Travel({ev,base,editable}){
   );
 }
 function TravelSheet({t,onClose,onSave,onDelete}){
+  const drivers=useDrivers();
   const [f,setF]=useState({});
   useEffect(()=>{if(t)setF({artist:'',contact:'',phone:'',mode:'',from:'',to:'',time:'',day:'',driver:'',notes:'',done:false,...t});},[t]);
   if(!t)return null;
@@ -2140,19 +2379,18 @@ function TravelSheet({t,onClose,onSave,onDelete}){
           <Field label="Datum" value={f.day} onChange={v=>set('day',v)} placeholder="18.07"/>
           <Field label={isIn?'Ankunftszeit':'Abfahrtszeit'} value={f.time} onChange={v=>set('time',v)} placeholder="11:50"/>
         </div>
-        <label className="block"><div className="text-zinc-500 text-[10px] mono uppercase tracking-wider mb-1">Transportart</div>
-          <select value={f.mode} onChange={e=>set('mode',e.target.value)}
-            className="w-full bg-zinc-900 border border-zinc-700 text-zinc-100 mono text-sm px-3 py-2.5 rounded-lg focus:border-amber-500">
-            <option value="">— wählen —</option>
-            {MODES.map(m=><option key={m} value={m}>{m}</option>)}</select></label>
+        <div><div className="text-zinc-500 text-[10px] mono uppercase tracking-wider mb-1.5">Wer fährt?</div>
+          <ByPicker by={travelBy(f)} mode={f.mode} onSet={p=>setF(x=>({...x,...p}))}/></div>
         <div className="grid grid-cols-2 gap-3">
           <Field label={isIn?'Kommt an in':'Startet bei'} value={f.from} onChange={v=>set('from',v)}
             placeholder={isIn?'Dortmund Flughafen':'Hotel'}/>
           <Field label={isIn?'Wird gebracht nach':'Fährt nach'} value={f.to} onChange={v=>set('to',v)}
             placeholder={isIn?'Hotel':'Düsseldorf Flughafen'}/>
         </div>
-        <Field label="Wer bringt ihn / Zuständig" value={f.driver} onChange={v=>set('driver',v)}
-          placeholder="z. B. Royal Transfer · Mitat Dağ · +49 151 …"/>
+        {travelBy(f)==='own'&&<AssignPicker value={f.assignedTo} onSet={v=>set('assignedTo',v)} drivers={drivers}/>}
+        {travelBy(f)==='extern'&&(
+          <Field label="Anbieter / Buchung" value={f.driver} onChange={v=>set('driver',v)}
+            placeholder="z. B. Royal Transfer · Mitat Dağ · +49 151 …"/>)}
         <div className="grid grid-cols-2 gap-3">
           <Field label="Kontaktperson" value={f.contact} onChange={v=>set('contact',v)} placeholder="Tourmanager"/>
           <Field label="Telefon" value={f.phone} onChange={v=>set('phone',v)} placeholder="+49 …"/>
@@ -3169,7 +3407,7 @@ function Settings({ev,base,eventId,onDeleted}){
 }
 
 /* ══ EVENT SHELL ═════════════════════════════════════════════════════ */
-function EventShell({eventId,role,viewAs,setViewAs,onBack,onLogout,driverId,me}){
+function EventShell({eventId,role,roles=[],viewAs,setViewAs,onBack,onLogout,driverId,me}){
   const base=`${ROOT}/events/${eventId}`;
   const [ev,setEv]=useState(null);
   const [tab,setTab]=useState('lineup');
@@ -3194,26 +3432,43 @@ function EventShell({eventId,role,viewAs,setViewAs,onBack,onLogout,driverId,me})
   const liveD=drivers.filter(d=>d.active).length;
 
   const openT=obj2arr(ev.travel).filter(t=>!t.done).length;
-  let tabs=[];
-  if(eff==='leitung'||eff==='admin'||eff==='events'){
-    tabs=[{id:'grid',label:'RASTER'},{id:'run',label:'ABLAUF'},{id:'lineup',label:'LINE-UP'},
-          {id:'pickups',label:'PICKUPS',badge:openP},{id:'travel',label:'AN/ABREISE',badge:openT},
-          {id:'shop',label:'EINKAUF'},{id:'map',label:'KARTE',badge:liveD},
-          {id:'guests',label:'GÄSTE'},{id:'kasse',label:'KASSE'},{id:'payouts',label:'AUSZAHLUNG'},
-          {id:'settle',label:'ABRECHNUNG'},{id:'contacts',label:'KONTAKTE'},{id:'notes',label:'NOTES'},
-          ...(editable?[{id:'settings',label:'EVENT'}]:[])];
-  } else if(eff==='einlass'){
-    tabs=[{id:'guests',label:'GÄSTE'},{id:'kasse',label:'KASSE'},
-          {id:'payouts',label:'AUSZAHLUNG'},{id:'settle',label:'ABRECHNUNG'},{id:'grid',label:'RASTER'}];
-  } else if(eff==='fahrer'){
-    tabs=[{id:'fahrer',label:'FAHRTEN',badge:openP+openT},
-          {id:'grid',label:'RASTER'},{id:'contacts',label:'KONTAKTE'}];
-  } else if(eff==='artistcare'){
-    tabs=[{id:'lineup',label:'LINE-UP'},{id:'grid',label:'RASTER'},{id:'run',label:'ABLAUF'},
-          {id:'shop',label:'EINKAUF'},{id:'pickups',label:'PICKUPS',badge:openP},
-          {id:'travel',label:'AN/ABREISE',badge:openT},{id:'map',label:'KARTE',badge:liveD},
-          {id:'contacts',label:'KONTAKTE'},{id:'notes',label:'NOTES'}];
-  }
+  /* Fahrten, die mir persönlich zugeteilt sind (oder niemandem) */
+  const myUid=me?.uid||driverId;
+  const mine=x=>!x.assignedTo||x.assignedTo===myUid;
+  const myOpen=obj2arr(ev.pickups).filter(p=>!p.done&&mine(p)).length
+    +obj2arr(ev.travel).filter(t=>!t.done&&travelBy(t)==='own'&&mine(t)).length;
+  /* Feste Reihenfolge aller Ansichten */
+  const ALL_TABS=[
+    {id:'fahrer', label:'FAHRTEN',    badge:myOpen},
+    {id:'grid',   label:'RASTER'},
+    {id:'run',    label:'ABLAUF'},
+    {id:'lineup', label:'LINE-UP'},
+    {id:'pickups',label:'PICKUPS',    badge:openP},
+    {id:'travel', label:'AN/ABREISE', badge:openT},
+    {id:'shop',   label:'EINKAUF'},
+    {id:'map',    label:'KARTE',      badge:liveD},
+    {id:'guests', label:'GÄSTE'},
+    {id:'kasse',  label:'KASSE'},
+    {id:'payouts',label:'AUSZAHLUNG'},
+    {id:'settle', label:'ABRECHNUNG'},
+    {id:'contacts',label:'KONTAKTE'},
+    {id:'notes',  label:'NOTES'},
+    {id:'settings',label:'EVENT'},
+  ];
+  /* Welche Rolle schaltet was frei */
+  const TABS_BY_ROLE={
+    leitung:['grid','run','lineup','pickups','travel','shop','map','guests','kasse','payouts','settle','contacts','notes','settings'],
+    einlass:['guests','kasse','payouts','settle','grid'],
+    fahrer:['fahrer','grid','contacts','map'],
+    artistcare:['lineup','grid','run','shop','pickups','travel','map','contacts','notes'],
+  };
+  /* Bei Mehrfachrollen alle Ansichten zusammenführen */
+  const activeRoles=isSuper
+    ? [ ['admin','events','leitung'].includes(viewAs) ? 'leitung' : viewAs ]
+    : roles;
+  const allowed=new Set(activeRoles.flatMap(r=>TABS_BY_ROLE[r]||[]));
+  if(!editable)allowed.delete('settings');
+  const tabs=ALL_TABS.filter(t=>allowed.has(t.id));
   const valid=tabs.some(t=>t.id===tab)?tab:tabs[0]?.id;
   const accent=ROLES[eff]?.color||'#fafafa';
 
@@ -3240,7 +3495,7 @@ function EventShell({eventId,role,viewAs,setViewAs,onBack,onLogout,driverId,me})
         {valid==='payouts' &&<Payouts ev={ev} base={base} me={me}/>}
         {valid==='settle'  &&<Abrechnung ev={ev} base={base} me={me} role={eff}/>}
         {valid==='contacts'&&<Contacts ev={ev} base={base} editable={editable}/>}
-        {valid==='fahrer'  &&<FahrerPanel ev={ev} base={base} driverId={driverId}/>}
+        {valid==='fahrer'  &&<FahrerPanel ev={ev} base={base} driverId={driverId} account={me}/>}
         {valid==='notes'   &&<Notes ev={ev} base={base} editable={editable}/>}
         {valid==='settings'&&<Settings ev={ev} base={base} eventId={eventId} onDeleted={onBack}/>}
       </div>
@@ -3464,7 +3719,8 @@ function Team({me,onBack,events}){
         {pending.length>0&&<SectionLabel>Team</SectionLabel>}
         <div className="space-y-2">
           {list.map(u=>{
-            const eff=ROLE_MAP[u.role]||'';
+            const urs=userRoles(u);
+            const eff=urs[0]||'';
             const isMe=u.uid===me.uid;
             return(
               <div key={u.id} className={`rounded-xl border px-4 py-3 ${u.active===false?'border-zinc-800/50 bg-zinc-900/25 opacity-50':'border-zinc-800 bg-zinc-900/60'}`}>
@@ -3476,20 +3732,35 @@ function Team({me,onBack,events}){
                       {isMe&&<span className="text-amber-500 text-[10px] ml-1.5">(du)</span>}</div>
                     <div className="mono text-[10px] text-zinc-500 truncate">{u.email}</div>
                   </div>
-                  {eff&&<span className="mono text-[9px] px-2 py-1 rounded border flex-shrink-0"
-                    style={{color:ROLES[eff]?.color,borderColor:(ROLES[eff]?.color||'#666')+'55',background:(ROLES[eff]?.color||'#666')+'14'}}>
-                    {ROLES[eff]?.label}</span>}
+                  <div className="flex gap-1 flex-wrap justify-end flex-shrink-0 max-w-[45%]">
+                    {urs.map(r=>(
+                      <span key={r} className="mono text-[9px] px-1.5 py-1 rounded border"
+                        style={{color:ROLES[r]?.color,borderColor:(ROLES[r]?.color||'#666')+'55',background:(ROLES[r]?.color||'#666')+'14'}}>
+                        {ROLES[r]?.label}</span>))}
+                  </div>
                 </div>
                 <div className="flex gap-1.5 mt-2.5 flex-wrap items-center">
-                  {OPTS.map(([val,lab])=>(
+                  {OPTS.map(([val,lab])=>{
+                    const has=userRoles(u).includes(val);
+                    const none=val==='';
+                    const active=none?userRoles(u).length===0:has;
+                    return(
                     <button key={val||'none'} disabled={isMe&&val!=='superadmin'}
-                      onClick={()=>fbUpd(`${USERS}/${u.id}`,{role:val||null,active:true})}
+                      onClick={()=>{
+                        if(none){ fbUpd(`${USERS}/${u.id}`,{roles:null,role:null,active:true}); return; }
+                        const cur=new Set(userRoles(u));
+                        cur.has(val)?cur.delete(val):cur.add(val);
+                        const arr=ROLE_ORDER.filter(r=>cur.has(r));
+                        fbUpd(`${USERS}/${u.id}`,{
+                          roles:arr.length?Object.fromEntries(arr.map(r=>[r,true])):null,
+                          role:arr[0]||null,active:true});
+                      }}
                       className={`px-2 py-1 rounded-md mono text-[10px] border transition-all
-                        ${(u.role||'')===val
+                        ${active
                           ?'bg-amber-500/15 border-amber-500/40 text-amber-300'
                           :isMe&&val!=='superadmin'?'border-zinc-900 text-zinc-800'
                           :'bg-zinc-900 border-zinc-700/70 text-zinc-500 active:bg-zinc-800'}`}>
-                      {lab}</button>))}
+                      {active&&!none?'✓ ':''}{lab}</button>);})}
                   <button onClick={()=>shareInvite(u.name,u.email,null)} title="Einladung teilen"
                     className="ml-auto text-zinc-500 mono text-[10px] px-2 py-1 border border-zinc-700 rounded-md active:bg-zinc-800">↗ teilen</button>
                   <button onClick={()=>resend(u.email)} title="Passwort-Link per E-Mail"
@@ -3604,7 +3875,8 @@ function App(){
     return()=>{unsub();offUser();};
   },[offline]);
 
-  const role=offline?'superadmin':(auth.user?ROLE_MAP[auth.user.role]||'':'');
+  const roles=offline?['superadmin']:userRoles(auth.user);
+  const role=roles[0]||'';                     // Hauptrolle für Anzeige und Rechte
 
   /* Daten erst laden, wenn jemand angemeldet ist */
   useEffect(()=>{
@@ -3662,7 +3934,7 @@ function App(){
   else if(events===null) body=<Connecting/>;
   else if(creating) body=<NewEvent onCancel={()=>setCreating(false)} onCreated={id=>{setCreating(false);open(id);}}/>;
   else if(openId&&visible[openId])
-    body=<EventShell eventId={openId} role={role} viewAs={viewAs} setViewAs={switchRole}
+    body=<EventShell eventId={openId} role={role} roles={roles} viewAs={viewAs} setViewAs={switchRole}
       onBack={back} onLogout={logout} driverId={driverId} me={auth.user}/>;
   else body=<EventList events={visible} role={role} onOpen={open} onLogout={logout}
     canManage={role==='superadmin'||role==='leitung'} onCreate={()=>setCreating(true)}
