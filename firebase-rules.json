@@ -16,9 +16,10 @@
 
       "ops": {
         "events": {
-          "$eid": {
 
-            ".read": "auth != null && (root.child('backstage/appUsers/'+auth.uid+'/roles/superadmin').val() === true || root.child('backstage/appUsers/'+auth.uid+'/role').val() === 'superadmin' || ((root.child('backstage/appUsers/'+auth.uid+'/roles').exists() || root.child('backstage/appUsers/'+auth.uid+'/role').exists()) && root.child('backstage/appUsers/'+auth.uid+'/pending').val() !== true && (root.child('backstage/appUsers/'+auth.uid+'/allEvents').val() !== false || root.child('backstage/appUsers/'+auth.uid+'/events/'+$eid).val() === true)))",
+          ".read": "auth != null && (root.child('backstage/appUsers/'+auth.uid+'/roles/superadmin').val() === true || root.child('backstage/appUsers/'+auth.uid+'/role').val() === 'superadmin' || ((root.child('backstage/appUsers/'+auth.uid+'/roles').exists() || root.child('backstage/appUsers/'+auth.uid+'/role').exists()) && root.child('backstage/appUsers/'+auth.uid+'/pending').val() !== true))",
+
+          "$eid": {
 
             ".write": "auth != null && (root.child('backstage/appUsers/'+auth.uid+'/roles/superadmin').val() === true || root.child('backstage/appUsers/'+auth.uid+'/roles/leitung').val() === true || root.child('backstage/appUsers/'+auth.uid+'/role').val() === 'superadmin' || root.child('backstage/appUsers/'+auth.uid+'/role').val() === 'leitung' || root.child('backstage/appUsers/'+auth.uid+'/role').val() === 'admin' || root.child('backstage/appUsers/'+auth.uid+'/role').val() === 'abendleitung' || root.child('backstage/appUsers/'+auth.uid+'/role').val() === 'techniker')",
 

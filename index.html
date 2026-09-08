@@ -795,7 +795,7 @@ function EventList({events,onOpen,canManage,onCreate,onDelete,role,onLogout,onSw
           </button>}
           <button onClick={onLogout} className="text-zinc-500 mono text-[11px] px-2 py-1.5 border border-zinc-700 rounded-lg active:bg-zinc-800">Logout</button>
         </div>}/>
-      {role==='superadmin'&&<SuperBar onSwitchRole={onSwitchRole} active="events"/>}
+      {role==='superadmin'&&<SuperBar onSwitchRole={onSwitchRole} active="events" viewAs={viewAs}/>}
       <div className="flex-1 overflow-y-auto px-4 pt-4 safe-bot">
         <div className="flex gap-2 mb-4">
           <button onClick={()=>setShowArch(false)} className={`flex-1 py-2 rounded-lg mono text-xs border transition-all ${!showArch?'bg-amber-500/10 border-amber-500/40 text-amber-400':'bg-zinc-900 border-zinc-800 text-zinc-500'}`}>Aktiv</button>
@@ -830,7 +830,7 @@ function EventList({events,onOpen,canManage,onCreate,onDelete,role,onLogout,onSw
 }
 
 /* ══ SUPERADMIN ROLE SWITCHER ════════════════════════════════════════ */
-function SuperBar({onSwitchRole,active}){
+function SuperBar({onSwitchRole,active,viewAs}){
   const items=[
     {id:'events', l:'EVENTS',  c:'#a1a1aa'},
     {id:'leitung',l:'LEITUNG', c:'#f59e0b'},
@@ -845,11 +845,15 @@ function SuperBar({onSwitchRole,active}){
       <span className="text-[9px] mono text-zinc-600 uppercase tracking-widest self-center px-1 flex-shrink-0">Admin</span>
       {items.map(i=>(
         <button key={i.id} onClick={()=>onSwitchRole(i.id)}
-          className="flex-shrink-0 px-2.5 py-1.5 rounded-lg mono text-[10px] font-bold border transition-all active:scale-95"
+          className="relative flex-shrink-0 px-2.5 py-1.5 rounded-lg mono text-[10px] font-bold border transition-all active:scale-95"
           style={active===i.id
             ?{color:i.c,borderColor:i.c+'66',background:i.c+'1a'}
             :{color:'#71717a',borderColor:'#27272a',background:'#18181b'}}>
           {i.l}
+          {/* Punkt zeigt, welche Rolle beim Öffnen eines Events greift */}
+          {active!==i.id&&viewAs===i.id&&(
+            <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full border border-zinc-900"
+              style={{background:i.c}}/>)}
         </button>
       ))}
     </div>
@@ -3564,7 +3568,9 @@ function Team({me,onBack,events}){
   const [busy,setBusy]=useState(false);
   const [msg,setMsg]=useState(null);
   useEffect(()=>fbOn(USERS,d=>setUsers(d||{})),[]);
-  const all=obj2arr(users).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+  /* Superadmins zuerst, dann nach Rolle, dann alphabetisch */
+  const rank=u=>{const r=userRoles(u)[0];const i=ROLE_ORDER.indexOf(r);return i<0?99:i;};
+  const all=obj2arr(users).sort((a,b)=>rank(a)-rank(b)||(a.name||'').localeCompare(b.name||''));
   const pending=all.filter(u=>u.pending);
   const list=all.filter(u=>!u.pending);
   const OPTS=[['superadmin','Superadmin'],['leitung','Leitung'],['einlass','Einlass'],
@@ -3771,6 +3777,14 @@ function Team({me,onBack,events}){
                     <button onClick={()=>{if(confirm(`${u.name||u.email} aus der Liste entfernen?\n\nDas Firebase-Konto bleibt bestehen — die Person hat aber keinen Zugang mehr.`))fbDel(`${USERS}/${u.id}`);}}
                       className="text-zinc-700 mono text-[11px] px-1.5 active:text-red-400">✕</button>)}
                 </div>
+                {/* Superadmin sieht immer alles — deshalb keine Auswahl */}
+                {eff==='superadmin'&&(
+                  <div className="mt-2.5 pt-2.5 border-t border-zinc-800/70 flex items-center gap-1.5">
+                    <span className="text-amber-500 text-[10px]">★</span>
+                    <span className="mono text-[10px] text-amber-400/90">
+                      Superadmin — sieht immer alle Events und darf Rollen vergeben</span>
+                  </div>)}
+
                 {/* Welche Events darf die Person sehen? */}
                 {eff&&eff!=='superadmin'&&evList.length>0&&(
                   <div className="mt-2.5 pt-2.5 border-t border-zinc-800/70">
@@ -3923,7 +3937,12 @@ function App(){
     setShowTeam(false);
     if(v==='events'){back();return;}
     setViewAs(v);localStorage.setItem('uo-viewas',v);
-    if(!openId){const first=Object.keys(events||{})[0];if(first)open(first);}
+    /* In die gewählte Rolle springen: offenes Event behalten, sonst das erste sichtbare öffnen */
+    if(!openId){
+      const first=Object.keys(visible||{})[0];
+      if(first)open(first);
+      else alert('Zum Wechseln in diese Ansicht brauchst du ein Event.\n\nLeg zuerst eines an oder öffne ein bestehendes.');
+    }
   };
 
   let body;

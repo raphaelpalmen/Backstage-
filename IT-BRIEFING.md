@@ -69,7 +69,18 @@ Was die Regeln durchsetzen:
 | Eigener Standort | nur die Person selbst |
 | Benutzerkonten und Rollen | nur Superadmin |
 
-Lesen darf nur, wer eine Rolle hat, nicht auf Freigabe wartet **und** dem Event zugewiesen ist.
+Lesen darf nur, wer eine Rolle hat und nicht auf Freigabe wartet.
+
+**Eine Einschränkung, die man kennen muss:** Die Zuweisung einzelner Events an Personen ist
+eine Sache der Oberfläche, keine harte Sperre. Firebase erlaubt Lesen immer für den ganzen
+abgefragten Ast — und die App lädt die Eventliste am Stück. Wer eine Rolle hat, könnte
+technisch also alle Events lesen, auch die, die ihm nicht zugewiesen sind. Schreiben ist
+davon unberührt und bleibt streng nach Rolle geregelt.
+
+Hart machen ließe sich das mit einem schlanken Index, aus dem jeder nur Titel und Datum
+liest, während die eigentlichen Eventdaten einzeln und mit Prüfung geladen werden. Ein
+überschaubarer Umbau, der sich lohnt, sobald mehrere Kunden oder Abteilungen dieselbe
+Datenbank teilen.
 
 **Zwei Dinge ändern sich dadurch im Betrieb:**
 
