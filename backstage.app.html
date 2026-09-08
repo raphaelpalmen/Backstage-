@@ -617,16 +617,16 @@ function LoginScreen({onOffline,onInstall}){
     if(!f.name.trim()||!f.email||!f.password){setErr('Alle Felder ausfüllen.');return;}
     if(f.password.length<6){setErr('Passwort mindestens 6 Zeichen.');return;}
     const code=f.invite.trim().toUpperCase();
-    const role=firstEver?'superadmin':INVITE_ROLES[code];
-    /* Ohne gültigen Code wird daraus eine Anfrage, die die Leitung freigibt. */
-    if(!firstEver&&code&&!role){setErr('Einladungscode stimmt nicht. Leer lassen, um Zugang anzufragen.');return;}
+    const wish=INVITE_ROLES[code]||f.wish||null;
+    if(code&&!INVITE_ROLES[code]){setErr('Einladungscode stimmt nicht. Leer lassen, um Zugang anzufragen.');return;}
     setBusy(true);setErr('');
     try{
       const cred=await fbAuth.createUserWithEmailAndPassword(f.email.trim(),f.password);
       try{ await cred.user.updateProfile({displayName:f.name.trim()}); }catch(e){}
+      /* Selbstregistrierung erzeugt immer eine Anfrage — die Rolle vergibt nur die Leitung.
+         Ein Code im Quelltext kann keine Rechte verleihen, er ist für jeden lesbar. */
       await db.ref(`${USERS}/${cred.user.uid}`).set({uid:cred.user.uid,name:f.name.trim(),
-        email:f.email.trim(),role:role||null,pending:role?null:true,
-        wish:role?null:(f.wish||null),active:true,createdAt:Date.now()});
+        email:f.email.trim(),pending:true,wish,active:true,createdAt:Date.now()});
     }catch(e){ setErr(AUTH_ERRORS[e.code]||('Registrierung fehlgeschlagen ('+(e.code||e.message)+')')); }
     finally{ setBusy(false); }
   };
@@ -658,7 +658,7 @@ function LoginScreen({onOffline,onInstall}){
             type="password" autoComplete={isReg?'new-password':'current-password'}
             onKeyDown={e=>e.key==='Enter'&&(isReg?register():login())}
             className="w-full bg-zinc-900 border border-zinc-700 text-white mono text-sm px-4 py-3.5 rounded-xl focus:border-amber-500 placeholder-zinc-700 transition-colors"/>
-          {isReg&&!firstEver&&(
+          {isReg&&(
             <>
               <input value={f.invite} onChange={e=>set('invite',e.target.value.toUpperCase())} placeholder="Einladungscode (falls vorhanden)"
                 autoCapitalize="characters" autoComplete="off"
@@ -674,9 +674,8 @@ function LoginScreen({onOffline,onInstall}){
                   <option value="artistcare">Artist Care</option>
                 </select>)}
               <div className="mono text-[10px] text-zinc-600 leading-relaxed px-1">
-                {f.invite.trim()
-                  ?'Mit Code bekommst du sofort Zugang.'
-                  :'Ohne Code wird daraus eine Anfrage — die Leitung gibt dich frei. Dein Passwort wählst du selbst, niemand sieht es.'}
+                Dein Konto wird angelegt und die Leitung gibt dich frei — meist in Minuten.
+                Der Code sagt ihr nur, welche Rolle du brauchst. Dein Passwort wählst du selbst, niemand sieht es.
               </div>
             </>)}
         </div>
@@ -1653,8 +1652,10 @@ function GuestRow({g,path,isFriends,onCheckIn}){
 }
 
 /* ══ FAHRER ══════════════════════════════════════════════════════════ */
-function FahrerPanel({ev,base,driverId,account}){
+function FahrerPanel({ev,base,driverId:localId,account}){
   const meta=ev.meta||{};
+  /* Standort unter der Konto-ID ablegen — nur die darf man laut Regeln selbst schreiben */
+  const driverId=account?.uid||localId;
   const me=(ev.drivers||{})[driverId]||{};
   const [name,setName]=useState(me.name||localStorage.getItem('uo-drivername')||'');
   const [on,setOn]=useState(!!me.active);
