@@ -3724,6 +3724,22 @@ function Team({me,onBack,events}){
             </div>
           </div>)}
 
+        {/* Wer ist wie oft vertreten */}
+        {list.length>0&&(
+          <div className="flex gap-1.5 flex-wrap mb-3">
+            {ROLE_ORDER.map(r=>{
+              const n=list.filter(u=>userRoles(u).includes(r)).length;
+              if(!n)return null;
+              const c=ROLES[r]?.color||'#71717a';
+              return(
+                <span key={r} className="mono text-[10px] px-2 py-1 rounded-lg border"
+                  style={{color:c,borderColor:c+'44',background:c+'12'}}>
+                  {n}× {ROLES[r]?.label}</span>);})}
+            {list.filter(u=>!userRoles(u).length).length>0&&(
+              <span className="mono text-[10px] px-2 py-1 rounded-lg border border-zinc-800 text-zinc-600">
+                {list.filter(u=>!userRoles(u).length).length}× ohne Zugang</span>)}
+          </div>)}
+
         {pending.length>0&&<SectionLabel>Team</SectionLabel>}
         <div className="space-y-2">
           {list.map(u=>{
@@ -3739,6 +3755,18 @@ function Team({me,onBack,events}){
                         cls="text-sm font-bold text-zinc-100" placeholder="Ohne Namen"/>
                       {isMe&&<span className="text-amber-500 text-[10px] ml-1.5">(du)</span>}</div>
                     <div className="mono text-[10px] text-zinc-500 truncate">{u.email}</div>
+                    {/* Klartext: was sieht die Person */}
+                    {eff&&(
+                      <div className="mono text-[10px] mt-0.5 truncate">
+                        {eff==='superadmin'
+                          ?<span className="text-amber-400/80">alle Events</span>
+                          :u.allEvents===false
+                            ?(Object.keys(u.events||{}).length
+                              ?<span className="text-zinc-400">{Object.keys(u.events).length} von {evList.length} Events: {
+                                  Object.keys(u.events).map(id=>evList.find(e=>e.id===id)?.name).filter(Boolean).join(', ')||'—'}</span>
+                              :<span className="text-red-400/80">kein Event zugewiesen — sieht nichts</span>)
+                            :<span className="text-zinc-400">alle Events</span>}
+                      </div>)}
                   </div>
                   <div className="flex gap-1 flex-wrap justify-end flex-shrink-0 max-w-[45%]">
                     {urs.map(r=>(
