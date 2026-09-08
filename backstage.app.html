@@ -1657,7 +1657,8 @@ function FahrerPanel({ev,base,driverId:localId,account}){
   /* Standort unter der Konto-ID ablegen — nur die darf man laut Regeln selbst schreiben */
   const driverId=account?.uid||localId;
   const me=(ev.drivers||{})[driverId]||{};
-  const [name,setName]=useState(me.name||localStorage.getItem('uo-drivername')||'');
+  /* Name kommt aus dem Konto — nur ohne Anmeldung muss er getippt werden */
+  const [name,setName]=useState(me.name||account?.name||localStorage.getItem('uo-drivername')||'');
   const [on,setOn]=useState(!!me.active);
   const [err,setErr]=useState('');
   const [awake,setAwake]=useState(false);
@@ -1665,7 +1666,7 @@ function FahrerPanel({ev,base,driverId:localId,account}){
   const [lastFix,setLastFix]=useState(null);
   const [,tick]=useState(0);
   const watch=useRef(null),wake=useRef(null);
-  useEffect(()=>{if(me.name&&!name)setName(me.name);},[me.name]);
+  useEffect(()=>{const n=me.name||account?.name;if(n&&!name)setName(n);},[me.name,account?.name]);
   useEffect(()=>{const t=setInterval(()=>tick(n=>n+1),10000);return()=>clearInterval(t);},[]);
   useEffect(()=>()=>{
     if(watch.current!=null)navigator.geolocation.clearWatch(watch.current);
