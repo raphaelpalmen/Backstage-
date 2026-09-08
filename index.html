@@ -431,17 +431,50 @@ function Field({label,value,onChange,placeholder,type='text',cls=''}){
     </label>
   );
 }
+/* Auf dem Handy hat die Zifferntastatur keinen Doppelpunkt — den setzen wir selbst.
+   „0936" wird zu „09:36", „9" bleibt „9", bis mehr kommt.                        */
+const fmtTime=s=>{
+  const d=String(s??'').replace(/\D/g,'').slice(0,4);
+  return d.length===4?d.slice(0,2)+':'+d.slice(2):d;   // Doppelpunkt erst, wenn er sicher stimmt
+};
+/* Beim Verlassen auf HH:MM bringen. null = unmögliche Zeit. */
+const normTime=s=>{
+  const d=String(s??'').replace(/\D/g,'');
+  if(!d)return '';
+  const h=d.length<=2?+d:+d.slice(0,-2);
+  const m=d.length<=2?0:+d.slice(-2);
+  if(h>23||m>59)return null;
+  return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');
+};
 function TimeEdit({value,onSave,cls='text-amber-400',size='text-sm'}){
-  const [ed,setEd]=useState(false);const [v,setV]=useState(value);
+  const [ed,setEd]=useState(false);const [v,setV]=useState(value);const [bad,setBad]=useState(false);
   useEffect(()=>setV(value),[value]);
-  const commit=()=>{setEd(false);if(v!==value)onSave(v);};
-  if(ed)return <input value={v} onChange={e=>setV(e.target.value)} onBlur={commit}
+  const commit=()=>{
+    const n=normTime(v);
+    if(n===null){ setBad(true); setTimeout(()=>setBad(false),1200); return; }  // offen lassen
+    setEd(false);setV(n);
+    if(n!==value)onSave(n);
+  };
+  if(ed)return <input value={v??''} onChange={e=>setV(fmtTime(e.target.value))} onBlur={commit}
     onKeyDown={e=>{if(e.key==='Enter')commit();if(e.key==='Escape'){setV(value);setEd(false);}}}
-    autoFocus inputMode="numeric" placeholder="HH:MM"
-    className={`bg-zinc-800 border border-amber-500 text-amber-400 mono ${size} font-bold px-1.5 py-0.5 rounded w-[62px] text-center`}/>;
+    autoFocus inputMode="numeric" placeholder="HH:MM" maxLength={5}
+    className={`bg-zinc-800 border text-amber-400 mono ${size} font-bold px-1.5 py-0.5 rounded w-[62px] text-center
+      ${bad?'border-red-500':'border-amber-500'}`}/>;
   return <button onClick={()=>setEd(true)}
     className={`mono font-bold ${size} ${cls} px-1.5 py-0.5 rounded border border-dashed border-zinc-800 hover:border-zinc-600 active:bg-zinc-800 transition-colors min-w-[58px]`}>
     {value||'--:--'}</button>;
+}
+/* Uhrzeitfeld für Formulare — gleiche Automatik */
+function TimeField({label,value,onChange,placeholder='22:00',cls=''}){
+  return(
+    <label className={`block ${cls}`}>
+      {label&&<div className="text-zinc-500 text-[10px] mono uppercase tracking-wider mb-1">{label}</div>}
+      <input value={value??''} inputMode="numeric" maxLength={5} placeholder={placeholder}
+        onChange={e=>onChange(fmtTime(e.target.value))}
+        onBlur={e=>{const n=normTime(e.target.value);if(n!==null)onChange(n);}}
+        className="w-full bg-zinc-900 border border-zinc-700 text-zinc-100 mono text-sm px-3 py-2.5 rounded-lg focus:border-amber-500 transition-colors placeholder-zinc-700"/>
+    </label>
+  );
 }
 function TextEdit({value,onSave,cls='',placeholder='…'}){
   const [ed,setEd]=useState(false);const [v,setV]=useState(value);
@@ -1227,7 +1260,11 @@ function TravelPart({dir,t,onToggle,onSet,days}){
       {t&&(
         <div className="space-y-2 fade">
           <div className="flex gap-2">
-            {inp('time',isIn?'Ankunft 11:50':'Abfahrt 16:30','w-24')}
+            <input value={t?.time??''} inputMode="numeric" maxLength={5}
+              placeholder={isIn?'Ankunft':'Abfahrt'}
+              onChange={e=>onSet({time:fmtTime(e.target.value)})}
+              onBlur={e=>{const n=normTime(e.target.value);if(n!==null)onSet({time:n});}}
+              className="w-24 bg-zinc-800 border border-zinc-700 text-white mono text-xs px-2 py-2 rounded focus:border-amber-500 placeholder-zinc-600 text-center"/>
             <select value={t.day||''} onChange={e=>onSet({day:e.target.value})}
               className="flex-1 min-w-0 bg-zinc-800 border border-zinc-700 text-zinc-300 mono text-xs px-2 py-2 rounded">
               <option value="">Datum…</option>
@@ -1313,9 +1350,9 @@ function ArtistSheet({a,meta,ev,base,onClose,onDelete}){
               {(meta.floors||[]).map(d=><option key={d} value={d}>{d}</option>)}</select></label>
         </div>
         <div className="grid grid-cols-3 gap-3">
-          <Field label="Set von" value={f.setStart} onChange={v=>set('setStart',v)} placeholder="22:00"/>
-          <Field label="Set bis"  value={f.setEnd}   onChange={v=>set('setEnd',v)}   placeholder="00:00"/>
-          <Field label="Soundcheck" value={f.soundcheck} onChange={v=>set('soundcheck',v)} placeholder="—"/>
+          <TimeField label="Set von" value={f.setStart} onChange={v=>set('setStart',v)} placeholder="22:00"/>
+          <TimeField label="Set bis" value={f.setEnd} onChange={v=>set('setEnd',v)} placeholder="00:00"/>
+          <TimeField label="Soundcheck" value={f.soundcheck} onChange={v=>set('soundcheck',v)} placeholder="13:00"/>
         </div>
         <Field label="Kontakt Name"  value={f.contactName}  onChange={v=>set('contactName',v)}  placeholder="Tourmanager"/>
         <Field label="Kontakt Telefon" value={f.contactPhone} onChange={v=>set('contactPhone',v)} placeholder="+49 …"/>
@@ -1348,8 +1385,10 @@ function ArtistSheet({a,meta,ev,base,onClose,onDelete}){
             {grounds.map((g,i)=>(
               <div key={i} className="bg-zinc-900 border border-zinc-800 rounded-lg p-2.5 space-y-2">
                 <div className="flex gap-2">
-                  <input value={g.time||''} onChange={e=>setGrounds(l=>l.map((x,j)=>j===i?{...x,time:e.target.value}:x))}
-                    placeholder="21:15" inputMode="numeric"
+                  <input value={g.time||''} inputMode="numeric" maxLength={5} placeholder="21:15"
+                    onChange={e=>setGrounds(l=>l.map((x,j)=>j===i?{...x,time:fmtTime(e.target.value)}:x))}
+                    onBlur={e=>{const n=normTime(e.target.value);
+                      if(n!==null)setGrounds(l=>l.map((x,j)=>j===i?{...x,time:n}:x));}}
                     className="w-20 bg-zinc-800 border border-zinc-700 text-white mono text-sm px-2 py-2 rounded text-center focus:border-blue-500 placeholder-zinc-600"/>
                   <input value={g.label||''} onChange={e=>setGrounds(l=>l.map((x,j)=>j===i?{...x,label:e.target.value}:x))}
                     placeholder={f.name||'Bezeichnung'}
@@ -1453,7 +1492,7 @@ function PickupSheet({p,meta,onClose,onSave,onDelete}){
       <div className="space-y-3">
         <Field label="Bezeichnung" value={f.label} onChange={v=>set('label',v)} placeholder="z. B. Artist Pickup"/>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Uhrzeit" value={f.time} onChange={v=>set('time',v)} placeholder="21:15"/>
+          <TimeField label="Uhrzeit" value={f.time} onChange={v=>set('time',v)} placeholder="21:15"/>
           <label className="block"><div className="text-zinc-500 text-[10px] mono uppercase tracking-wider mb-1">Tag</div>
             <select value={f.day} onChange={e=>set('day',e.target.value)}
               className="w-full bg-zinc-900 border border-zinc-700 text-zinc-100 mono text-sm px-3 py-2.5 rounded-lg focus:border-amber-500">
@@ -2383,7 +2422,7 @@ function TravelSheet({t,onClose,onSave,onDelete}){
         <Field label="Artist / Person" value={f.artist} onChange={v=>set('artist',v)} placeholder="Name"/>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Datum" value={f.day} onChange={v=>set('day',v)} placeholder="18.07"/>
-          <Field label={isIn?'Ankunftszeit':'Abfahrtszeit'} value={f.time} onChange={v=>set('time',v)} placeholder="11:50"/>
+          <TimeField label={isIn?'Ankunftszeit':'Abfahrtszeit'} value={f.time} onChange={v=>set('time',v)} placeholder="11:50"/>
         </div>
         <div><div className="text-zinc-500 text-[10px] mono uppercase tracking-wider mb-1.5">Wer fährt?</div>
           <ByPicker by={travelBy(f)} mode={f.mode} onSet={p=>setF(x=>({...x,...p}))}/></div>
