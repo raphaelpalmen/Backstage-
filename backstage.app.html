@@ -780,7 +780,7 @@ function NoAccess({user,onLogout}){
 }
 
 /* ══ EVENT LIST ══════════════════════════════════════════════════════ */
-function EventList({events,onOpen,canManage,onCreate,onDelete,role,onLogout,onSwitchRole,onTeam,me,pendingCount,restricted}){
+function EventList({events,onOpen,canManage,onCreate,onDelete,role,onLogout,onSwitchRole,onTeam,me,pendingCount,restricted,viewAs}){
   const [showArch,setShowArch]=useState(false);
   const list=obj2arr(events).map(e=>({id:e.id,...(e.meta||{}),_artists:Object.keys(e.artists||{}).length,_pickups:Object.keys(e.pickups||{}).length}))
     .filter(e=>showArch?e.archived:!e.archived)
@@ -2760,51 +2760,51 @@ function Abrechnung({ev,base,me,role}){
 
   const nextNo=history.length+1;
   const text=useMemo(()=>{
-    const L=[];
-    L.push(`ABRECHNUNG — ${meta.name||'Event'}`);
-    L.push(`${meta.date||''} · ${meta.city||''}`);
+    const zeilen=[];
+    zeilen.push(`ABRECHNUNG — ${meta.name||'Event'}`);
+    zeilen.push(`${meta.date||''} · ${meta.city||''}`);
     if(last){
-      L.push('');
-      L.push(`*** KORRIGIERTE FASSUNG Nr. ${nextNo} ***`);
-      L.push(`Ersetzt die Abrechnung vom ${new Date(last.confirmedAt).toLocaleString('de-DE')}.`);
+      zeilen.push('');
+      zeilen.push(`*** KORRIGIERTE FASSUNG Nr. ${nextNo} ***`);
+      zeilen.push(`Ersetzt die Abrechnung vom ${new Date(last.confirmedAt).toLocaleString('de-DE')}.`);
       if(diffs.length){
-        L.push('Geändert hat sich:');
-        diffs.forEach(d=>L.push(`  ${d.l}: ${d.k==='people'?d.alt:eur(d.alt)} → ${d.k==='people'?d.neu:eur(d.neu)}`));
+        zeilen.push('Geändert hat sich:');
+        diffs.forEach(d=>zeilen.push(`  ${d.l}: ${d.k==='people'?d.alt:eur(d.alt)} → ${d.k==='people'?d.neu:eur(d.neu)}`));
       }
     }
-    L.push('');
-    L.push('ABENDKASSE (Klicker)');
+    zeilen.push('');
+    zeilen.push('ABENDKASSE (Klicker)');
     t.blocks.forEach(b=>{const s=blockSum(b);const cc=b.counts||{};
-      L.push(`  ${b.label} — ${eur(b.price)} p. P.`);
-      L.push(`    EC  ${cc.ecNorm||0} × = ${eur(s.ec)}`);
-      L.push(`    Bar ${cc.barNorm||0} × = ${eur(s.bar)}`);
-      L.push(`    Summe ${eur(s.total)} · ${s.people} Gäste`);});
-    L.push(`  Abendkasse gesamt  ${eur(t.kasseEc+t.kasseBar)} · ${t.kassePeople} Gäste`);
-    L.push('');
-    L.push('FRIENDSLIST (Namensliste)');
-    L.push(`  EC   ${eur(t.fr.ec)}`);
-    L.push(`  Bar  ${eur(t.fr.bar)}`);
-    L.push(`  Summe ${eur(t.fr.total)} · ${t.fr.people} Personen auf ${t.fr.count} Einträgen`);
-    if(t.fr.free)L.push(`  davon frei: ${t.fr.free} Personen`);
-    L.push('');
-    L.push(`EINNAHMEN EC    ${eur(t.ec)}`);
-    L.push(`EINNAHMEN BAR   ${eur(t.bar)}`);
-    L.push(`GESAMT          ${eur(t.total)}`);
-    L.push(`Zahlende Gäste  ${t.people}`);
-    L.push('');
-    L.push('AUSZAHLUNGEN');
-    if(!t.payouts.length)L.push('  keine');
-    t.payouts.forEach(p=>L.push(`  ${p.label}${p.note?' ('+p.note+')':''}  −${eur(p.amount)}  [${p.by}]`));
-    L.push(`  Summe        −${eur(t.out)}`);
-    L.push('');
-    L.push(`BARGELD ZUR ÜBERGABE  ${eur(t.cash)}`);
-    L.push(`NETTO GESAMT          ${eur(t.net)}`);
-    L.push('');
-    L.push(`Eingecheckt: Gästeliste ${guests} · Friendslist ${friends}`);
-    L.push('');
-    L.push(`Bestätigt von ${me?.name||me?.email||''} am ${new Date().toLocaleString('de-DE')}`);
-    if(last)L.push(`Fassung Nr. ${nextNo}`);
-    return L.join('\n');
+      zeilen.push(`  ${b.label} — ${eur(b.price)} p. P.`);
+      zeilen.push(`    EC  ${cc.ecNorm||0} × = ${eur(s.ec)}`);
+      zeilen.push(`    Bar ${cc.barNorm||0} × = ${eur(s.bar)}`);
+      zeilen.push(`    Summe ${eur(s.total)} · ${s.people} Gäste`);});
+    zeilen.push(`  Abendkasse gesamt  ${eur(t.kasseEc+t.kasseBar)} · ${t.kassePeople} Gäste`);
+    zeilen.push('');
+    zeilen.push('FRIENDSLIST (Namensliste)');
+    zeilen.push(`  EC   ${eur(t.fr.ec)}`);
+    zeilen.push(`  Bar  ${eur(t.fr.bar)}`);
+    zeilen.push(`  Summe ${eur(t.fr.total)} · ${t.fr.people} Personen auf ${t.fr.count} Einträgen`);
+    if(t.fr.free)zeilen.push(`  davon frei: ${t.fr.free} Personen`);
+    zeilen.push('');
+    zeilen.push(`EINNAHMEN EC    ${eur(t.ec)}`);
+    zeilen.push(`EINNAHMEN BAR   ${eur(t.bar)}`);
+    zeilen.push(`GESAMT          ${eur(t.total)}`);
+    zeilen.push(`Zahlende Gäste  ${t.people}`);
+    zeilen.push('');
+    zeilen.push('AUSZAHLUNGEN');
+    if(!t.payouts.length)zeilen.push('  keine');
+    t.payouts.forEach(p=>zeilen.push(`  ${p.label}${p.note?' ('+p.note+')':''}  −${eur(p.amount)}  [${p.by}]`));
+    zeilen.push(`  Summe        −${eur(t.out)}`);
+    zeilen.push('');
+    zeilen.push(`BARGELD ZUR ÜBERGABE  ${eur(t.cash)}`);
+    zeilen.push(`NETTO GESAMT          ${eur(t.net)}`);
+    zeilen.push('');
+    zeilen.push(`Eingecheckt: Gästeliste ${guests} · Friendslist ${friends}`);
+    zeilen.push('');
+    zeilen.push(`Bestätigt von ${me?.name||me?.email||''} am ${new Date().toLocaleString('de-DE')}`);
+    if(last)zeilen.push(`Fassung Nr. ${nextNo}`);
+    return zeilen.join('\n');
   },[JSON.stringify([ev.kasse,meta,guests,friends,last?.confirmedAt])]);
 
   const confirmSend=()=>{
@@ -3988,7 +3988,8 @@ function App(){
   else body=<EventList events={visible} role={role} onOpen={open} onLogout={logout}
     canManage={role==='superadmin'||role==='leitung'} onCreate={()=>setCreating(true)}
     onSwitchRole={switchRole} onTeam={role==='superadmin'?()=>setShowTeam(true):null}
-    me={auth.user} pendingCount={pendingCount} restricted={auth.user?.allEvents===false}/>;
+    me={auth.user} pendingCount={pendingCount} restricted={auth.user?.allEvents===false}
+    viewAs={viewAs}/>;
   return(
     <React.Fragment key={gen}>
       <Toast/>
