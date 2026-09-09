@@ -10,7 +10,8 @@
           ".write": "auth != null && (root.child('backstage/appUsers/'+auth.uid+'/roles/superadmin').val() === true || root.child('backstage/appUsers/'+auth.uid+'/role').val() === 'superadmin' || ($uid === auth.uid && !data.exists() && newData.child('pending').val() === true && !newData.hasChild('roles') && !newData.child('role').exists()))",
 
           "name":            { ".write": "auth != null && ($uid === auth.uid || root.child('backstage/appUsers/'+auth.uid+'/roles/superadmin').val() === true || root.child('backstage/appUsers/'+auth.uid+'/role').val() === 'superadmin')" },
-          "mustSetPassword": { ".write": "auth != null && ($uid === auth.uid || root.child('backstage/appUsers/'+auth.uid+'/roles/superadmin').val() === true || root.child('backstage/appUsers/'+auth.uid+'/role').val() === 'superadmin')" }
+          "mustSetPassword": { ".write": "auth != null && ($uid === auth.uid || root.child('backstage/appUsers/'+auth.uid+'/roles/superadmin').val() === true || root.child('backstage/appUsers/'+auth.uid+'/role').val() === 'superadmin')" },
+          "lastSeen":        { ".write": "auth != null && ($uid === auth.uid || root.child('backstage/appUsers/'+auth.uid+'/roles/superadmin').val() === true || root.child('backstage/appUsers/'+auth.uid+'/role').val() === 'superadmin')" }
         }
       },
 

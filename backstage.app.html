@@ -383,7 +383,14 @@ const uid=()=>Math.random().toString(36).slice(2,10);
 const clockNow=()=>new Date().toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'});
 const mapsUrl=(a)=>`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(a||'')}`;
 const ago=ts=>{if(!ts)return'';const s=Math.floor((Date.now()-ts)/1000);
-  if(s<20)return'gerade eben';if(s<60)return s+'s her';if(s<3600)return Math.floor(s/60)+' min her';return Math.floor(s/3600)+' h her';};
+  if(s<20)return'gerade eben';
+  if(s<60)return s+'s her';
+  if(s<3600)return Math.floor(s/60)+' min her';
+  if(s<86400)return Math.floor(s/3600)+' h her';
+  const d=Math.floor(s/86400);
+  if(d===1)return'gestern';
+  if(d<31)return'vor '+d+' Tagen';
+  return new Date(ts).toLocaleDateString('de-DE');};
 
 /* ══ UI ATOMS ════════════════════════════════════════════════════════ */
 function BackBtn({onClick,label='Zurück'}){
@@ -3794,6 +3801,18 @@ function Team({me,onBack,events}){
                         cls="text-sm font-bold text-zinc-100" placeholder="Ohne Namen"/>
                       {isMe&&<span className="text-amber-500 text-[10px] ml-1.5">(du)</span>}</div>
                     <div className="mono text-[10px] text-zinc-500 truncate">{u.email}</div>
+                    {/* War die Person schon drin? */}
+                    <div className="mono text-[10px] mt-0.5 flex items-center gap-1.5">
+                      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                        !u.lastSeen?'bg-zinc-700'
+                        :Date.now()-u.lastSeen<86400000?'bg-emerald-500':'bg-zinc-600'}`}/>
+                      <span className={!u.lastSeen?'text-amber-400/80':'text-zinc-500'}>
+                        {!u.lastSeen
+                          ?(u.mustSetPassword?'noch nie geöffnet — Einladung offen':'noch nie geöffnet')
+                          :`zuletzt da ${ago(u.lastSeen)}`}
+                        {u.mustSetPassword&&u.lastSeen?' · Passwort noch nicht gesetzt':''}
+                      </span>
+                    </div>
                     {/* Klartext: was sieht die Person */}
                     {eff&&(
                       <div className="mono text-[10px] mt-0.5 truncate">
@@ -3951,6 +3970,8 @@ function App(){
     const unsub=fbAuth.onAuthStateChanged(u=>{
       offUser();
       if(!u){ setAuth({state:'out',user:null}); setEvents(null); return; }
+      /* einmal je App-Start festhalten, dass die Person da war */
+      fbUpd(`${USERS}/${u.uid}`,{lastSeen:Date.now()}).catch(()=>{});
       offUser=fbOn(`${USERS}/${u.uid}`,prof=>{
         setAuth({state:'in',user:{uid:u.uid,email:u.email,...(prof||{})}});
       },()=>setAuth({state:'in',user:{uid:u.uid,email:u.email}}));
