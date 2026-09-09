@@ -1,0 +1,8 @@
+# Entwurf der Startseite — noch nicht veröffentlichen.
+# Liegt nur lokal, damit die Wurzel-index.html (= die App) unberührt bleibt.
+start/
+
+# Kram, der nicht ins Repo gehört
+.DS_Store
+.Rhistory
+node_modules/

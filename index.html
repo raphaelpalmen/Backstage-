@@ -2070,8 +2070,8 @@ function Grid({ev,base}){
                   let s1=toMins(a.setEnd); if(s1<=s0)s1+=1440;
                   const top=(s0-lo)*PX_PER_MIN, h=Math.max(24,(s1-s0)*PX_PER_MIN);
                   const s=st[a.id]||{};
-                  const live=isToday&&nowM>=s0&&nowM<s1;
                   const done=!!s.set_end;
+                  const live=!done&&isToday&&nowM>=s0&&nowM<s1;
                   return(
                     <button key={a.id} onClick={()=>setSel(a)}
                       className={`absolute left-0 right-0 rounded-lg border px-1.5 py-1 text-left overflow-hidden transition-all active:scale-[.98]
@@ -2081,8 +2081,10 @@ function Grid({ev,base}){
                         zIndex:live?20:5}}>
                       <span className={`block mono text-[10px] font-bold leading-tight truncate ${live?'text-emerald-200':done?'text-zinc-600':'text-zinc-100'}`}>{a.name}</span>
                       {h>38&&<span className={`block mono text-[8px] leading-tight ${live?'text-emerald-300/80':'text-zinc-500'}`}>{a.setStart}–{a.setEnd}</span>}
-                      {h>56&&a.soundcheck&&<span className="block mono text-[8px] text-violet-300/80 leading-tight">SC {a.soundcheck}</span>}
+                      {h>56&&a.soundcheck&&!done&&<span className="block mono text-[8px] text-violet-300/80 leading-tight">SC {a.soundcheck}</span>}
                       {h>56&&live&&<span className="block mono text-[8px] text-emerald-400 font-bold leading-tight mt-0.5">▶ LÄUFT</span>}
+                      {done&&<span className="block mono text-[8px] text-zinc-500 leading-tight mt-0.5">
+                        ✓ beendet{s.ausgecheckt?' · aus':''}</span>}
                     </button>);
                 })}
               </div>);
@@ -2157,8 +2159,11 @@ function Runsheet({ev,base}){
 
   const items=[];
   if(show.set)obj2arr(ev.artists).filter(a=>a.day===day).forEach(a=>{
-    items.push({k:'set',id:a.id,t:a.setStart,end:a.setEnd,title:a.name,sub:a.floor,a});
-    if(a.soundcheck)items.push({k:'sc',id:a.id+'-sc',t:a.soundcheck,title:`Soundcheck · ${a.name}`,sub:a.floor,a});
+    const sa=st[a.id]||{};
+    items.push({k:'set',id:a.id,t:a.setStart,end:a.setEnd,title:a.name,sub:a.floor,a,
+      done:!!sa.set_end});
+    if(a.soundcheck)items.push({k:'sc',id:a.id+'-sc',t:a.soundcheck,title:`Soundcheck · ${a.name}`,
+      sub:a.floor,a,done:!!sa.soundcheck_ok});
   });
   if(show.pick)obj2arr(ev.pickups).filter(p=>p.day===day).forEach(p=>
     items.push({k:'pick',id:p.id,t:p.time,title:p.label,sub:`${p.from} → ${p.to}`,done:p.done}));
@@ -2195,7 +2200,8 @@ function Runsheet({ev,base}){
           <div className="absolute left-[52px] top-2 bottom-2 w-px bg-zinc-800"/>
           {items.map((i,idx)=>{
             const K=KIND[i.k];
-            const live=i.k==='set'&&isToday&&toMins(i.t)<=nowM&&toMins(i.end)>nowM;
+            /* abgehaktes Set gilt als beendet, auch wenn die Uhr noch läuft */
+            const live=i.k==='set'&&!i.done&&isToday&&toMins(i.t)<=nowM&&toMins(i.end)>nowM;
             const past=isToday&&toMins(i.t)<nowM;
             const s=i.a?(st[i.a.id]||{}):{};
             return(
@@ -2225,7 +2231,14 @@ function Runsheet({ev,base}){
                     <span className={`block mono text-[13px] font-bold mt-1 truncate ${i.done?'text-zinc-600 line-through':'text-zinc-100'}`}>{i.title}</span>
                     <span className="block mono text-[10px] text-zinc-500 truncate">{i.sub}</span>
                     {i.k==='set'&&i.a?.tech&&<span className="block mono text-[9px] text-violet-400/70 truncate mt-0.5">🎛 {i.a.tech}</span>}
-                    {i.k==='set'&&s.im_club&&<span className="block mono text-[9px] text-emerald-500/80 mt-0.5">✓ im Club</span>}
+                    {i.k==='set'&&(
+                      <span className="flex flex-wrap gap-1 mt-1">
+                        {[['pickup_ok','Pickup'],['im_club','im Club'],['rider_ok','Rider raus'],
+                          ['set_end','Set beendet'],['ausgecheckt','ausgecheckt']]
+                          .filter(([k])=>s[k]).map(([k,l])=>(
+                            <span key={k} className="mono text-[8px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/25">
+                              ✓ {l}</span>))}
+                      </span>)}
                   </span>
                 </button>
               </React.Fragment>);
@@ -2502,6 +2515,7 @@ function Kasse({ev,base,role}){
   const blocks=obj2arr(ev.kasse?.blocks).sort((a,b)=>(a.startedAt||0)-(b.startedAt||0));
   const active=blocks.find(b=>!b.closedAt);
   const [newPrice,setNewPrice]=useState(false);
+  const [editBlock,setEditBlock]=useState(null);
   const [np,setNp]=useState({label:'',price:'',friendsPrice:''});
 
   const startBlock=(label,price,friendsPrice)=>{
@@ -2539,8 +2553,9 @@ function Kasse({ev,base,role}){
   const fr=friendsTotals(ev);
   return(
     <div className="px-4 pt-4 pb-24">
-      {/* aktueller Preis */}
-      <div className="rounded-xl border border-amber-500/30 bg-amber-500/[.07] px-4 py-3 mb-4">
+      {/* aktueller Preis — antippen zum Ändern */}
+      <button onClick={()=>setEditBlock(active)}
+        className="w-full text-left rounded-xl border border-amber-500/30 bg-amber-500/[.07] px-4 py-3 mb-4 active:bg-amber-500/[.12] transition-colors">
         <div className="flex items-center gap-2">
           <div className="flex-1 min-w-0">
             <div className="mono text-[9px] text-amber-500/80 uppercase tracking-[.18em]">Aktueller Preis</div>
@@ -2550,10 +2565,12 @@ function Kasse({ev,base,role}){
             <div className="bebas text-2xl text-amber-400 leading-none">{eur(active.price)}</div>
             <div className="mono text-[10px] text-zinc-500">Friends {eur(active.friendsPrice)}</div>
           </div>
+          <span className="text-amber-500/60 text-xs flex-shrink-0">✎</span>
         </div>
         <div className="mono text-[10px] text-zinc-600 mt-1">
-          seit {new Date(active.startedAt).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})} Uhr</div>
-      </div>
+          seit {new Date(active.startedAt).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})} Uhr
+          · antippen zum Ändern</div>
+      </button>
 
       {/* Zähler — nur Abendkasse */}
       <div className="mono text-[9px] text-zinc-600 uppercase tracking-[.18em] mb-2">Abendkasse · {eur(active.price)} pro Person</div>
@@ -2612,6 +2629,9 @@ function Kasse({ev,base,role}){
         ↻ Neuer Preis — Zähler beginnt von vorn</button>
 
       <ClosedBlocks blocks={blocks.filter(b=>b.closedAt)} base={base} hasActive={true}/>
+
+      {/* laufenden Block korrigieren */}
+      <BlockEdit b={editBlock} base={base} hasActive={true} onClose={()=>setEditBlock(null)}/>
 
       <Sheet open={newPrice} onClose={()=>setNewPrice(false)} title="Neuer Preis">
         <div className="space-y-3">
@@ -2691,13 +2711,21 @@ function BlockEdit({b,base,hasActive,onClose}){
       </div>
     </div>);
   return(
-    <Sheet open={!!b} onClose={onClose} title="Preisblock korrigieren"
+    <Sheet open={!!b} onClose={onClose} title={b.closedAt?'Preisblock korrigieren':'Laufenden Preis ändern'}
       onDelete={()=>{if(confirm(`Block „${b.label}" mit allen Zählerständen löschen?`)){fbDel(`${base}/kasse/blocks/${b.id}`);onClose();}}}>
       <div className="space-y-3">
         <div className="mono text-[10px] text-zinc-500 leading-relaxed">
-          {new Date(b.startedAt).toLocaleString('de-DE')} – {new Date(b.closedAt).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})} Uhr
+          {b.closedAt
+            ? <>{new Date(b.startedAt).toLocaleString('de-DE')} – {new Date(b.closedAt).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})} Uhr</>
+            : <>läuft seit {new Date(b.startedAt).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})} Uhr</>}
           {b.editedAt&&<span className="block text-amber-500/70">zuletzt korrigiert {new Date(b.editedAt).toLocaleString('de-DE')}</span>}
         </div>
+        {!b.closedAt&&(
+          <div className="mono text-[10px] text-zinc-500 leading-relaxed bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2.5">
+            Ändert den Preis <b className="text-zinc-300">ab jetzt</b>. Bereits eingecheckte
+            Friendslist-Gäste behalten ihren gebuchten Betrag — den korrigierst du bei Bedarf
+            direkt beim Gast im Tab GÄSTE.
+          </div>)}
         <Field label="Bezeichnung" value={f.label} onChange={v=>set('label',v)}/>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Eintritt normal" value={f.price} onChange={v=>set('price',v)} type="number"/>
